@@ -1,8 +1,8 @@
 # WalkieTalk Go
 
-Go rewrite of the WalkieTalk FastAPI + Socket.IO server.
+Go backend + single-page web client for WalkieTalk push-to-talk voice channels.
 
-This version keeps the same core behavior but replaces Socket.IO with a native WebSocket endpoint:
+This version uses a native WebSocket endpoint instead of Socket.IO:
 
 ```txt
 /ws
@@ -16,24 +16,46 @@ WebSocket messages use this shape:
 
 ## Features
 
-- REST endpoints: `/`, `/health`, `/ready`, `/stats`, `/config/mapbox`, `/ai/chat`, `/zones`
+- REST endpoints: `/`, `/health`, `/ready`, `/stats`, `/channels`, `/config/mapbox`, `/zones`
 - Native WebSocket realtime server
-- Room join/leave/name update
+- Room/channel join, leave, rename, and live member count
+- Channel list page/sheet with `ចំនួនមនុស្សក្នុង channel`
+- Empty user-created channels expire after 15 minutes by default
 - Push-to-talk voice relay
 - Live voice chunks
-- AI chat relay to your existing `AI_ASSISTANT_URL` or `AI_CHAT_URL`
-- WebRTC screen-share signaling only
-- SDP sanitizer for malformed browser SDP
-- Local rate limit fallback
+- Local rate-limit fallback
 - Optional Redis distributed rate limiting
 - Supabase REST integration for `geo_zones`
-- Production CORS, optional `PUBLIC_API_KEY` protection, and device-scoped zone sync
+- Production CORS and optional `PUBLIC_API_KEY` protection
+- Clean mobile-first UI
+
+Removed in this build:
+
+- AI assistant UI and `/ai/chat` functionality
+- Screen-share UI and WebRTC signaling events
+
+## Channel behavior
+
+A channel is created when the first user joins it. The `/channels` endpoint and channel sheet show:
+
+- channel name
+- current user count
+- current members
+- empty expiration time
+
+When the last user leaves a channel, it stays visible for `CHANNEL_EMPTY_TTL_SECS`. Default:
+
+```env
+CHANNEL_EMPTY_TTL_SECS=900
+```
+
+That is 15 minutes. After that, the backend removes the empty channel from the in-memory channel list.
 
 ## Important migration note
 
 Your Python server used Socket.IO. This Go version uses native WebSocket because Go Socket.IO libraries are less stable than native WebSocket.
 
-The included `web/index.html` has already been updated for the Go backend. It uses a small `WTNativeSocket` wrapper so the existing UI code can still call:
+The included `web/index.html` uses a small `WTNativeSocket` wrapper so UI code can still call:
 
 ```js
 socket.emit("join_room", { room, name });
@@ -46,18 +68,17 @@ Internally the wrapper sends native WebSocket messages like:
 {"event":"join_room","data":{"room":"ABC123","name":"kimheng"}}
 ```
 
-Optional frontend runtime config is loaded from `web/env.js`. Keep it public-safe:
+Optional frontend runtime config:
 
-```js
-window.WT_ENV = {
-  API_BASE_URL: "https://your-go-backend.onrender.com",
-  WS_URL: "",
-  MAPBOX_CONFIG_URL: "https://your-go-backend.onrender.com/config/mapbox",
-  PUBLIC_API_KEY: ""
-};
+```html
+<script>
+  window.WT_SERVER_URL = "https://your-go-backend.onrender.com";
+  // Only for private/admin deployments. Do not expose this on public websites.
+  window.WT_PUBLIC_API_KEY = "your-public-api-key";
+</script>
 ```
 
-When the frontend is served from the same Go backend at `/web/index.html`, it uses the same origin automatically. For static hosting, set `WT_ENV.API_BASE_URL` in `web/env.js` or store these browser localStorage keys:
+You can also store these in browser localStorage keys:
 
 ```txt
 wt_server_url
@@ -80,12 +101,11 @@ http://localhost:3000/health
 http://localhost:3000/web/index.html
 ```
 
-For local static test, you can also open `web/index.html` directly in your browser.
-
 ## Build
 
 ```bash
 go mod tidy
+go test ./...
 go build -o walkietalk-go ./cmd/server
 ./walkietalk-go
 ```
@@ -106,9 +126,10 @@ Clean old env values before deploying:
 ```env
 MAPBOX_ACCESS_TOKEN=pk_your_token_without_quotes_or_newline
 REDIS_ENABLED=true
+CHANNEL_EMPTY_TTL_SECS=900
 ```
 
-Do not use:
+Do not use quoted values with pasted newlines:
 
 ```env
 MAPBOX_ACCESS_TOKEN="pk...\n"
@@ -117,19 +138,13 @@ REDIS_ENABLED="True\n"
 
 ## Security
 
-`PUBLIC_API_KEY` protects admin/private HTTP endpoints:
-
-- `/stats`
-- `/ai/chat`
-
-Zone writes are device-scoped and public by default so the normal browser app can save zones without causing `401 Unauthorized`. To protect zone writes too, set:
+Set `PUBLIC_API_KEY` only when you need private/admin protection. When set, the server protects `/stats`. Zone write protection is separately controlled by:
 
 ```env
-ZONE_WRITE_REQUIRES_API_KEY=true
-PUBLIC_API_KEY=your-private-key
+ZONE_WRITE_REQUIRES_API_KEY=false
 ```
 
-Then send the key from trusted clients only:
+For a public user app, keep zone writes device-scoped and leave `ZONE_WRITE_REQUIRES_API_KEY=false`. For a private/admin deployment, set it to `true` and send the key as `X-Api-Key`.
 
 ```bash
 curl -H "X-Api-Key: your-key" https://your-server/stats
@@ -147,14 +162,7 @@ Client -> server:
 - `voice_message`
 - `voice_chunk`
 - `voice_stream_end`
-- `ai_chat_message`
-- `screen_share_start`
-- `screen_share_stop`
-- `screen_share_state`
-- `screen_viewer_ready`
-- `screen_offer`
-- `screen_answer`
-- `screen_ice_candidate`
+- `channels_list`, alias: `channels_refresh`
 - `quality_pong`
 
 Server -> client:
@@ -164,28 +172,19 @@ Server -> client:
 - `peer_joined`
 - `peer_left`
 - `peer_name_updated`
+- `channels_state`
+- `channels_expired`
 - `voice_message`
 - `voice_chunk`
 - `voice_stream_end`
-- `ai_chat_typing`
-- `ai_chat_response`
-- `ai_chat_error`
 - `quality_ping`
 - `quality_update`
-- `screen_share_started`
-- `screen_share_stopped`
-- `screen_share_state`
-- `screen_viewer_ready`
-- `screen_offer`
-- `screen_answer`
-- `screen_ice_candidate`
-- `screen_share_error`
 - `zone_updated`
 - `zone_deleted`
 
-## Supabase table example
+Legacy AI and screen-share events return `FEATURE_DISABLED`.
 
-The full safe migration is included in `sql/geo_zones.sql`. You can paste it into Supabase SQL Editor. Core schema:
+## Supabase table example
 
 ```sql
 create table if not exists public.geo_zones (
@@ -205,31 +204,18 @@ create table if not exists public.geo_zones (
 );
 
 create index if not exists geo_zones_device_id_idx on public.geo_zones(device_id);
-create index if not exists geo_zones_expires_at_idx on public.geo_zones(expires_at);
-
-create or replace function public.set_geo_zones_updated_at()
-returns trigger language plpgsql as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_geo_zones_updated_at on public.geo_zones;
-create trigger trg_geo_zones_updated_at
-before update on public.geo_zones
-for each row execute function public.set_geo_zones_updated_at();
 ```
 
-## Zone sync notes
+A full migration is included at:
 
-- `GET /zones` should include `device_id` as a query param or `X-Device-Id` header. Missing `device_id` now returns an empty zone list instead of hard-failing with `400`.
-- `POST /zones` validates `lat`, `lng`, and `radius_m`. It tries modern and legacy Supabase column variants so older tables do not fail immediately on unknown columns.
-- The frontend sends both `device_id` query/header and `device_id` in the JSON body.
+```txt
+sql/geo_zones.sql
+```
 
 ## Production notes
 
 - Deploy as one instance unless you add WebSocket pub/sub fanout.
+- The in-memory channel list is per running backend instance.
 - Redis is used for rate limiting, not cross-instance WebSocket room fanout.
 - Use sticky sessions if you scale multiple instances.
 - Restrict Mapbox `pk` token by allowed domains in Mapbox dashboard.

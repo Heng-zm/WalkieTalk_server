@@ -24,13 +24,14 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 
-	mu      sync.RWMutex
-	clients map[string]*Client
-	users   map[string]*User
-	rooms   map[string]map[string]bool
-	screens map[string]*ScreenState
-	quality map[string]*QualityState
-	closed  bool
+	mu       sync.RWMutex
+	clients  map[string]*Client
+	users    map[string]*User
+	rooms    map[string]map[string]bool
+	channels map[string]*ChannelState
+	screens  map[string]*ScreenState
+	quality  map[string]*QualityState
+	closed   bool
 }
 
 func NewHub(cfg config.Config, rate *store.RateStore, aiClient *ai.Client, logger *log.Logger) *Hub {
@@ -44,12 +45,15 @@ func NewHub(cfg config.Config, rate *store.RateStore, aiClient *ai.Client, logge
 		clients:    make(map[string]*Client),
 		users:      make(map[string]*User),
 		rooms:      make(map[string]map[string]bool),
+		channels:   make(map[string]*ChannelState),
 		screens:    make(map[string]*ScreenState),
 		quality:    make(map[string]*QualityState),
 	}
 }
 
 func (h *Hub) Run(ctx context.Context) {
+	cleanupTicker := time.NewTicker(time.Minute)
+	defer cleanupTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -58,6 +62,8 @@ func (h *Hub) Run(ctx context.Context) {
 			h.addClient(c)
 		case c := <-h.unregister:
 			h.removeClient(c.SID, "disconnect")
+		case <-cleanupTicker.C:
+			h.CleanupExpiredChannels()
 		}
 	}
 }
@@ -91,6 +97,7 @@ func (h *Hub) Close() {
 	h.clients = make(map[string]*Client)
 	h.users = make(map[string]*User)
 	h.rooms = make(map[string]map[string]bool)
+	h.channels = make(map[string]*ChannelState)
 	h.screens = make(map[string]*ScreenState)
 	h.quality = make(map[string]*QualityState)
 	h.mu.Unlock()
@@ -129,6 +136,7 @@ func (h *Hub) removeClient(sid, reason string) {
 	closeClientSend(c)
 	if room != "" {
 		h.Broadcast(room, "peer_left", map[string]any{"sid": sid, "name": name}, sid)
+		h.BroadcastChannelsState()
 	}
 	h.log.Printf("disconnect sid=%s room=%s", sid, room)
 }
@@ -220,6 +228,7 @@ func (h *Hub) Stats() map[string]any {
 		"instance":      h.cfg.InstanceID,
 		"local_users":   len(h.users),
 		"local_rooms":   rooms,
+		"channels":      h.channelsSnapshotLocked(),
 		"screen_shares": screens,
 		"quality_tasks": len(h.quality),
 	}
@@ -243,6 +252,118 @@ func (h *Hub) ScreensSnapshot() map[string]*ScreenState {
 		out[k] = v
 	}
 	return out
+}
+
+func (h *Hub) ChannelsSnapshot() []ChannelState {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.channelsSnapshotLocked()
+}
+
+func (h *Hub) channelsSnapshotLocked() []ChannelState {
+	now := time.Now()
+	out := make([]ChannelState, 0, len(h.channels))
+	for name, state := range h.channels {
+		if state == nil {
+			continue
+		}
+		copyState := *state
+		copyState.Name = name
+		copyState.UserCount = len(h.rooms[name])
+		copyState.Members = h.membersLocked(name)
+		if copyState.UserCount == 0 && copyState.EmptySince != nil {
+			exp := copyState.EmptySince.Add(h.cfg.ChannelEmptyTTL)
+			copyState.ExpiresAt = &exp
+		} else {
+			copyState.EmptySince = nil
+			copyState.ExpiresAt = nil
+		}
+		if copyState.CreatedAt.IsZero() {
+			copyState.CreatedAt = now
+		}
+		if copyState.LastActive.IsZero() {
+			copyState.LastActive = copyState.CreatedAt
+		}
+		out = append(out, copyState)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UserCount != out[j].UserCount {
+			return out[i].UserCount > out[j].UserCount
+		}
+		if !out[i].LastActive.Equal(out[j].LastActive) {
+			return out[i].LastActive.After(out[j].LastActive)
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func (h *Hub) channelPayload() map[string]any {
+	return map[string]any{"channels": h.ChannelsSnapshot(), "empty_ttl_seconds": int(h.cfg.ChannelEmptyTTL.Seconds())}
+}
+
+func (h *Hub) SendChannelsState(sid string) {
+	h.Send(sid, "channels_state", h.channelPayload())
+}
+
+func (h *Hub) BroadcastChannelsState() {
+	h.BroadcastAll("channels_state", h.channelPayload())
+}
+
+func (h *Hub) touchChannelLocked(room string, now time.Time) {
+	if room == "" {
+		return
+	}
+	state := h.channels[room]
+	if state == nil {
+		state = &ChannelState{Name: room, CreatedAt: now}
+		h.channels[room] = state
+	}
+	state.UserCount = len(h.rooms[room])
+	state.LastActive = now
+	state.EmptySince = nil
+	state.ExpiresAt = nil
+}
+
+func (h *Hub) markChannelEmptyLocked(room string, now time.Time) {
+	if room == "" {
+		return
+	}
+	state := h.channels[room]
+	if state == nil {
+		state = &ChannelState{Name: room, CreatedAt: now}
+		h.channels[room] = state
+	}
+	state.UserCount = 0
+	state.LastActive = now
+	if state.EmptySince == nil {
+		empty := now
+		state.EmptySince = &empty
+	}
+	expires := state.EmptySince.Add(h.cfg.ChannelEmptyTTL)
+	state.ExpiresAt = &expires
+}
+
+func (h *Hub) CleanupExpiredChannels() {
+	now := time.Now()
+	expired := make([]string, 0)
+	h.mu.Lock()
+	for room, state := range h.channels {
+		if state == nil || state.EmptySince == nil || len(h.rooms[room]) > 0 {
+			continue
+		}
+		if now.Sub(*state.EmptySince) >= h.cfg.ChannelEmptyTTL {
+			delete(h.channels, room)
+			delete(h.rooms, room)
+			delete(h.screens, room)
+			expired = append(expired, room)
+		}
+	}
+	h.mu.Unlock()
+	if len(expired) > 0 {
+		h.BroadcastAll("channels_expired", map[string]any{"channels": expired})
+		h.BroadcastChannelsState()
+	}
 }
 
 func (h *Hub) Members(room string) []RoomMember {
@@ -287,6 +408,9 @@ func (h *Hub) leaveNoBroadcast(sid string) (string, string) {
 		delete(h.rooms[room], sid)
 		if len(h.rooms[room]) == 0 {
 			delete(h.rooms, room)
+			h.markChannelEmptyLocked(room, time.Now())
+		} else {
+			h.touchChannelLocked(room, time.Now())
 		}
 	}
 	delete(h.users, sid)

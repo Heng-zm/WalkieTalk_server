@@ -20,14 +20,8 @@ services:
         value: "60"
       - key: MAX_ZONE_WRITE_RATE
         value: "20"
-      - key: AI_API_KEY
-        sync: false
-      - key: AI_ASSISTANT_API_KEY
-        sync: false
-      - key: AI_ASSISTANT_URL
-        value: https://bot-voice-sqnz.onrender.com/ai-assistant
-      - key: AI_CHAT_URL
-        sync: false
+      - key: CHANNEL_EMPTY_TTL_SECS
+        value: "900"
       - key: MAPBOX_ACCESS_TOKEN
         sync: false
       - key: SUPABASE_URL

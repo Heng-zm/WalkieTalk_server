@@ -38,3 +38,13 @@ type QualityState struct {
 	RTTs    []float64
 	Cycles  []bool
 }
+
+type ChannelState struct {
+	Name       string       `json:"name"`
+	UserCount  int          `json:"user_count"`
+	Members    []RoomMember `json:"members,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	LastActive time.Time    `json:"last_active"`
+	EmptySince *time.Time   `json:"empty_since,omitempty"`
+	ExpiresAt  *time.Time   `json:"expires_at,omitempty"`
+}

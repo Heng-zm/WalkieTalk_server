@@ -32,24 +32,14 @@ func (h *Hub) HandleEvent(ctx context.Context, c *Client, env Envelope) {
 		h.handleVoiceChunk(ctx, c.SID, data)
 	case "voice_stream_end":
 		h.handleVoiceStreamEnd(c.SID, data)
+	case "channels_list", "channels_refresh":
+		h.SendChannelsState(c.SID)
 	case "ai_chat_message":
-		h.handleAIChat(ctx, c.SID, data)
+		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "AI assistant was removed from this version"})
 	case "quality_pong":
 		h.handleQualityPong(c.SID, data)
-	case "screen_share_start":
-		h.handleScreenStart(ctx, c.SID, data)
-	case "screen_share_stop":
-		h.handleScreenStop(c.SID, data)
-	case "screen_share_state":
-		h.handleScreenState(c.SID)
-	case "screen_viewer_ready":
-		h.handleViewerReady(ctx, c.SID, data)
-	case "screen_offer":
-		h.handleScreenOffer(ctx, c.SID, data)
-	case "screen_answer":
-		h.handleScreenAnswer(ctx, c.SID, data)
-	case "screen_ice_candidate":
-		h.handleScreenICE(ctx, c.SID, data)
+	case "screen_share_start", "screen_share_stop", "screen_share_state", "screen_viewer_ready", "screen_offer", "screen_answer", "screen_ice_candidate":
+		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "Screen sharing was removed from this version"})
 	default:
 		h.Send(c.SID, "error", map[string]any{"code": "UNKNOWN_EVENT", "msg": "Unknown event: " + env.Event})
 	}
@@ -61,12 +51,12 @@ func (h *Hub) handleJoin(sid string, data map[string]any) {
 	if room == "" {
 		return
 	}
-	h.stopScreenShareForSID(sid, "room_change")
 	oldRoom, oldName := h.leaveNoBroadcast(sid)
 	if oldRoom != "" && oldRoom != room {
 		h.Broadcast(oldRoom, "peer_left", map[string]any{"sid": sid, "name": oldName}, sid)
 	}
 
+	now := time.Now()
 	h.mu.Lock()
 	if h.rooms[room] == nil {
 		h.rooms[room] = make(map[string]bool)
@@ -77,21 +67,23 @@ func (h *Hub) handleJoin(sid string, data map[string]any) {
 		return
 	}
 	h.rooms[room][sid] = true
-	h.users[sid] = &User{SID: sid, Name: name, Room: room, JoinedAt: time.Now()}
+	h.users[sid] = &User{SID: sid, Name: name, Room: room, JoinedAt: now}
+	h.touchChannelLocked(room, now)
 	members := h.membersLocked(room)
-	active := h.screens[room]
+	userCount := len(members)
 	h.mu.Unlock()
 
 	h.Broadcast(room, "peer_joined", map[string]any{"sid": sid, "name": name}, sid)
-	h.Send(sid, "room_state", map[string]any{"members": members, "screen_share": active})
-	h.log.Printf("join sid=%s name=%s room=%s n=%d", sid, name, room, len(members))
+	h.Send(sid, "room_state", map[string]any{"members": members, "user_count": userCount})
+	h.BroadcastChannelsState()
+	h.log.Printf("join sid=%s name=%s room=%s n=%d", sid, name, room, userCount)
 }
 
 func (h *Hub) handleLeave(sid string) {
-	h.stopScreenShareForSID(sid, "leave_room")
 	room, name := h.leaveNoBroadcast(sid)
 	if room != "" {
 		h.Broadcast(room, "peer_left", map[string]any{"sid": sid, "name": name}, sid)
+		h.BroadcastChannelsState()
 	}
 }
 
@@ -109,15 +101,10 @@ func (h *Hub) handleUpdateName(sid string, data map[string]any) {
 		u.Name = newName
 		room = u.Room
 	}
-	if room != "" {
-		if state := h.screens[room]; state != nil && state.SenderSID == sid {
-			state.SenderName = newName
-		}
-	}
 	h.mu.Unlock()
 	if room != "" {
 		h.Broadcast(room, "peer_name_updated", map[string]any{"sid": sid, "name": newName}, sid)
-		h.handleScreenStateForRoom(room)
+		h.BroadcastChannelsState()
 	}
 	h.log.Printf("rename %s -> %s", oldName, newName)
 }

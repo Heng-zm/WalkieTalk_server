@@ -59,7 +59,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/config/mapbox", s.handleMapboxConfig)
-	mux.HandleFunc("/ai/chat", s.handleAIChat)
+	mux.HandleFunc("/channels", s.handleChannels)
+	mux.HandleFunc("/ai/chat", s.handleAIDisabled)
 	mux.HandleFunc("/zones", s.handleZones)
 	mux.HandleFunc("/zones/", s.handleZoneByID)
 	mux.HandleFunc("/ws", s.handleWS)
@@ -80,23 +81,24 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"ready":          "/ready",
 		"stats":          "/stats",
 		"zones":          "/zones",
-		"ai_chat":        "/ai/chat",
+		"channels":       "/channels",
 		"mapbox_config":  "/config/mapbox",
 		"websocket_path": "/ws",
 		"socketio_path":  "replaced by /ws native WebSocket",
 		"features": map[string]any{
-			"voice_relay":                 true,
-			"live_voice_chunks":           true,
-			"ai_chat":                     true,
-			"geo_zones":                   true,
-			"screen_share_signaling":      true,
-			"sdp_sanitizer":               true,
-			"redis_rate_fallback":         true,
-			"runtime_stats":               true,
-			"mapbox_env_config":           s.cfg.MapboxAccessToken != "",
-			"zone_write_api_key_required": s.cfg.ZoneWriteRequiresAPIKey,
+			"voice_relay":                  true,
+			"live_voice_chunks":            true,
+			"channel_list":                 true,
+			"channel_empty_expire_minutes": int(s.cfg.ChannelEmptyTTL.Minutes()),
+			"ai_chat":                      false,
+			"geo_zones":                    true,
+			"screen_share_signaling":       false,
+			"redis_rate_fallback":          true,
+			"runtime_stats":                true,
+			"mapbox_env_config":            s.cfg.MapboxAccessToken != "",
+			"zone_write_api_key_required":  s.cfg.ZoneWriteRequiresAPIKey,
 		},
-		"events": []string{"join_room", "leave_room", "update_name", "voice_message", "voice_chunk", "voice_stream_end", "ai_chat_message", "screen_share_start", "screen_share_stop", "screen_share_state", "screen_viewer_ready", "screen_offer", "screen_answer", "screen_ice_candidate", "quality_pong"},
+		"events": []string{"join_room", "leave_room", "update_name", "voice_message", "voice_chunk", "voice_stream_end", "channels_list", "channels_state", "channels_expired", "quality_pong"},
 	})
 }
 
@@ -106,11 +108,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"instance":                    s.cfg.InstanceID,
 		"connections":                 s.hub.Stats()["local_users"],
 		"rooms_local":                 s.hub.RoomsSnapshot(),
-		"screen_shares_local":         s.hub.ScreensSnapshot(),
+		"channels_local":              s.hub.ChannelsSnapshot(),
 		"redis":                       s.rate.RedisOK(r.Context()),
 		"supabase_configured":         s.cfg.SupabaseURL != "" && s.cfg.SupabaseKey != "",
-		"ai_configured":               s.cfg.AIChatURL != "" || s.cfg.AIAssistantURL != "",
-		"ai_key_configured":           s.cfg.AIAssistantAPIKey != "",
+		"ai_configured":               false,
+		"ai_key_configured":           false,
 		"mapbox_configured":           s.cfg.MapboxAccessToken != "",
 		"zone_write_api_key_required": s.cfg.ZoneWriteRequiresAPIKey,
 		"uptime_s":                    int(time.Since(s.start).Seconds()),
@@ -158,6 +160,27 @@ func (s *Server) handleMapboxConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.cfg.PublicConfigCacheSecs))
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": s.cfg.MapboxAccessToken, "styles": map[string]string{"standard": s.cfg.MapboxStandardStyle, "standard_satellite": s.cfg.MapboxStandardSatelliteStyle}, "default_style": "standard"})
+}
+
+func (s *Server) handleChannels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.rate.Check(r.Context(), "channels_read:"+clientIP(r), s.cfg.MaxZoneReadRate, s.cfg.MsgRateWindow) {
+		s.writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "Slow down — too many channel refreshes"})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"channels":          s.hub.ChannelsSnapshot(),
+		"empty_ttl_seconds": int(s.cfg.ChannelEmptyTTL.Seconds()),
+	})
+}
+
+func (s *Server) handleAIDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	s.writeJSON(w, http.StatusGone, map[string]any{"ok": false, "error": "AI assistant was removed from this version"})
 }
 
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
@@ -544,7 +567,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Api-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Api-Key,X-Device-Id,X-WT-Device-Id")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

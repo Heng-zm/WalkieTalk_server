@@ -55,6 +55,7 @@ type Config struct {
 	MaxScreenICEChars       int
 	ScreenStateTTL          time.Duration
 	ZoneTTL                 time.Duration
+	ChannelEmptyTTL         time.Duration
 	ZoneWriteRequiresAPIKey bool
 	MaxZoneReadRate         int
 	MaxZoneWriteRate        int
@@ -106,6 +107,7 @@ func Load() Config {
 		MaxScreenICEChars:            envInt("MAX_SCREEN_ICE_CHARS", 16_000, 1_000, 80_000),
 		ScreenStateTTL:               time.Duration(envInt("SCREEN_STATE_TTL", 6*3600, 60, 24*3600)) * time.Second,
 		ZoneTTL:                      time.Duration(envInt("ZONE_TTL_SECS", 5*3600, 300, 7*24*3600)) * time.Second,
+		ChannelEmptyTTL:              time.Duration(envInt("CHANNEL_EMPTY_TTL_SECS", 15*60, 60, 24*3600)) * time.Second,
 		ZoneWriteRequiresAPIKey:      envBool("ZONE_WRITE_REQUIRES_API_KEY", false),
 		MaxZoneReadRate:              envInt("MAX_ZONE_READ_RATE", 60, 1, 600),
 		MaxZoneWriteRate:             envInt("MAX_ZONE_WRITE_RATE", 20, 1, 120),

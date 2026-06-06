@@ -282,6 +282,24 @@ body::after {
 .sheet-btn:active { opacity:0.75; transform:scale(0.98); }
 .sheet-btn.primary   { background:linear-gradient(180deg,#ffb340 0%,var(--amber) 100%); color:#000; font-family:var(--mono); text-transform:uppercase; font-size:13px; box-shadow:0 1px 0 rgba(255,255,255,0.6) inset; }
 .sheet-btn.secondary { background:rgba(255,255,255,0.05); color:rgba(255,255,255,0.7); border:1px solid rgba(255,255,255,0.05); }
+/* Channel list sheet */
+#aiView, #screenView, #navAI, #navScreen { display: none !important; }
+.channel-sheet { max-height: min(86vh, 720px); }
+.channel-list-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:4px; }
+.channel-list-title { font-size:12px; font-weight:700; color:rgba(255,255,255,0.72); letter-spacing:.3px; text-transform:uppercase; }
+.channel-refresh { border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.045); color:rgba(255,255,255,0.7); border-radius:999px; padding:7px 10px; font:600 11px var(--mono); cursor:pointer; }
+.channel-list { display:flex; flex-direction:column; gap:8px; max-height:260px; overflow:auto; padding:2px 0 4px; }
+.channel-row { width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid rgba(255,255,255,0.065); background:rgba(255,255,255,0.035); border-radius:14px; padding:12px 13px; cursor:pointer; color:var(--white); font:inherit; text-align:left; transition:background .15s var(--ease-out), border-color .15s var(--ease-out), transform .1s var(--ease-spring); }
+.channel-row:active { transform:scale(.985); background:rgba(255,255,255,0.065); }
+.channel-row.active { border-color:rgba(48,209,88,.28); background:rgba(48,209,88,.07); }
+.channel-row-main { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.channel-row-name { font:700 13px var(--mono); letter-spacing:.4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.channel-row-meta { font-size:11px; color:rgba(255,255,255,.45); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.channel-row-count { flex-shrink:0; display:flex; align-items:center; gap:6px; border-radius:999px; padding:6px 10px; background:rgba(255,255,255,.055); color:rgba(255,255,255,.82); font:700 12px var(--mono); }
+.channel-row-dot { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.22); }
+.channel-row-count.online .channel-row-dot { background:var(--green); box-shadow:0 0 6px var(--green); }
+.channel-empty { border:1px dashed rgba(255,255,255,.09); border-radius:14px; padding:14px; text-align:center; color:rgba(255,255,255,.46); font-size:12px; line-height:1.45; }
+
 .geo-toolbar { display:none; }
 .geo-fab     { display:none; }
 .geo-banners { position:absolute; bottom:calc(env(safe-area-inset-bottom,0px) + 66px); left:12px; right:12px; z-index:20; display:flex; flex-direction:column; gap:4px; max-height:130px; overflow-y:auto; pointer-events:none; }
@@ -1524,20 +1542,6 @@ body.socket-offline .power-btn::after { background: var(--red); box-shadow: 0 0 
       </svg>
       <span class="nav-label">Map</span>
     </button>
-    <button class="nav-btn" id="navAI" title="AI Chat">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M5 15.5h9.5a4 4 0 0 1 0 8H9l-4 2v-10z" transform="translate(0 -4)" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
-      </svg>
-      <span class="nav-label">AI</span>
-    </button>
-    <button class="nav-btn" id="navScreen" title="Screen Share">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M8 21h8M12 16v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-      <span class="nav-label">Screen</span>
-    </button>
     <button class="nav-btn" id="navChannel">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
         <path d="M2 5h20M2 12h20M2 19h20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -1685,13 +1689,19 @@ body.socket-offline .power-btn::after { background: var(--red); box-shadow: 0 0 
 
 <!-- Channel sheet -->
 <div class="overlay" id="channelOverlay">
-  <div class="sheet">
+  <div class="sheet channel-sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">Join a Channel</div>
-    <div class="sheet-sub">Share the same name with friends</div>
-    <input class="sheet-input" id="channelInput" placeholder="CHANNEL-01" maxlength="30" autocomplete="off" spellcheck="false" style="text-transform:uppercase"/>
-    <button class="sheet-btn primary" id="channelJoinBtn">Join</button>
-    <button class="sheet-btn primary" id="channelAiBtn" style="background: linear-gradient(180deg, #bf5af2 0%, #9e36e2 100%); color: #fff; margin-top: 4px; box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset;">Open AI Chat</button>
+    <div class="sheet-title">Channels</div>
+    <div class="sheet-sub">ជ្រើស channel ឬបង្កើតថ្មី · Empty channels expire after 15 minutes</div>
+    <div class="channel-list-head">
+      <div class="channel-list-title">Channel list · ចំនួនមនុស្ស</div>
+      <button class="channel-refresh" id="channelRefreshBtn" type="button">Refresh</button>
+    </div>
+    <div class="channel-list" id="channelList">
+      <div class="channel-empty">Loading channels...</div>
+    </div>
+    <input class="sheet-input" id="channelInput" placeholder="CREATE OR JOIN CHANNEL" maxlength="30" autocomplete="off" spellcheck="false" style="text-transform:uppercase"/>
+    <button class="sheet-btn primary" id="channelJoinBtn">Create / Join</button>
     <button class="sheet-btn secondary" id="channelCancelBtn">Cancel</button>
   </div>
 </div>
@@ -2172,8 +2182,6 @@ var wBars = Array.from(document.querySelectorAll('[id^="wb"]')).sort(function(a,
     socket.on('connect', _urlRoomHandler);
   }
 
-  aiLoadHistory();
-  aiRender();
   geoLoadData();
   getLocation();
   wireUI();
@@ -2302,14 +2310,7 @@ function wireUI() {
 
   _listen('navTalk', 'click', showMain);
   _listen('navMap', 'click', showMapView);
-  _listen('navAI', 'click', showAiView);
   _listen('navChannel', 'click', openChannelSheet);
-  _listen('aiBackBtn', 'click', showMain);
-  _listen('aiClearBtn', 'click', aiClearHistory);
-  _listen('aiVoiceBtn', 'click', function(){ showMain(); joinChannel('AI-BOT'); });
-  _listen('aiInput', 'input', aiOnInput);
-  _listen('aiInput', 'keydown', aiOnKeyDown);
-  _listen('aiForm', 'submit', function(e){ e.preventDefault(); aiSendMessage(); });
   _listen('mapBackBtn', 'click', showMain);
 
   _listen('channelOverlay', 'click', function (e) { if (e.target === this) closeChannelSheet(); });
@@ -2317,12 +2318,8 @@ function wireUI() {
   _listen('channelInput', 'input', function () { this.value = this.value.toUpperCase(); });
   _listen('channelInput', 'keydown', function (e) { if (e.key === 'Enter') doJoin(); });
   _listen('channelJoinBtn', 'click', doJoin);
+  _listen('channelRefreshBtn', 'click', loadChannelList);
 
-  // AI assistant button click handler
-  _listen('channelAiBtn', 'click', function() {
-    closeChannelSheet();
-    showAiView();
-  });
 
   _listen('nameOverlay', 'click', function (e) { if (e.target === this) this.classList.remove('open'); });
   _listen('nameCancelBtn', 'click', function () { document.getElementById('nameOverlay').classList.remove('open'); });
@@ -2362,7 +2359,6 @@ function wireUI() {
   document.addEventListener('visibilitychange', function () { if (!document.hidden) channelPill.classList.remove('has-unread'); });
   window.addEventListener('pagehide', function() {
     _releaseMicStream();
-    if (_screenSharing) screenStopShare('pagehide', true);
     if (isLive) stopLive();
   });
   var _audioUnlockHandler = function() {
@@ -3009,11 +3005,80 @@ function updateMapMarker(center) {
   }
 }
 
+// ── Channel list ──
+var _channelList = [];
+var _channelListLoading = false;
+
+function loadChannelList() {
+  if (_channelListLoading) return;
+  _channelListLoading = true;
+  var listEl = document.getElementById('channelList');
+  if (listEl && !_channelList.length) renderChannelList([], 'Loading channels...');
+  fetch(SERVER_URL + '/channels', {
+    method: 'GET',
+    headers: wtDeviceHeaders({ 'Accept': 'application/json' })
+  }).then(function(resp) {
+    return resp.json().then(function(body) {
+      if (!resp.ok || !body || body.ok === false) throw new Error((body && body.error) || ('HTTP ' + resp.status));
+      _channelList = Array.isArray(body.channels) ? body.channels : [];
+      renderChannelList(_channelList);
+    });
+  }).catch(function(err) {
+    console.warn('loadChannelList:', err);
+    renderChannelList(_channelList, _channelList.length ? '' : 'No channels yet. Create one below.');
+  }).finally(function() {
+    _channelListLoading = false;
+  });
+}
+
+function renderChannelList(channels, message) {
+  var list = document.getElementById('channelList');
+  if (!list) return;
+  channels = Array.isArray(channels) ? channels.slice() : [];
+  if (!channels.length) {
+    list.innerHTML = '<div class="channel-empty">' + _esc(message || 'No channels yet. Create one below.') + '</div>';
+    return;
+  }
+  list.innerHTML = channels.map(function(ch) {
+    var name = String(ch.name || '').toUpperCase().replace(/[^A-Z0-9\-_]/g, '').slice(0, 40);
+    if (!name) return '';
+    var count = Number(ch.user_count || 0);
+    var active = myRoom && name === myRoom;
+    var expires = ch.expires_at ? _channelExpiryText(ch.expires_at) : '';
+    var meta = count > 0 ? 'Active now' : (expires || 'Empty · expires soon');
+    return '<button class="channel-row' + (active ? ' active' : '') + '" type="button" data-channel="' + _esc(name) + '">' +
+      '<span class="channel-row-main"><span class="channel-row-name">#' + _esc(name) + '</span><span class="channel-row-meta">' + _esc(meta) + '</span></span>' +
+      '<span class="channel-row-count' + (count > 0 ? ' online' : '') + '"><span class="channel-row-dot"></span>' + count + ' នាក់</span>' +
+      '</button>';
+  }).join('');
+  Array.from(list.querySelectorAll('.channel-row')).forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var room = btn.getAttribute('data-channel') || '';
+      if (!room) return;
+      var input = document.getElementById('channelInput');
+      if (input) input.value = room;
+      closeChannelSheet();
+      joinChannel(room);
+    });
+  });
+}
+
+function _channelExpiryText(value) {
+  var ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return '';
+  var ms = ts - Date.now();
+  if (ms <= 0) return 'Expired';
+  var min = Math.max(1, Math.ceil(ms / 60000));
+  return 'Empty · expires in ' + min + ' min';
+}
+
 // ── Sheets ──
 function openChannelSheet() {
   var inp = document.getElementById('channelInput');
   inp.value = myRoom || '';
   document.getElementById('channelOverlay').classList.add('open');
+  renderChannelList(_channelList, _channelList.length ? '' : 'Loading channels...');
+  loadChannelList();
   setTimeout(function () { inp.focus(); inp.select(); }, 150);
 }
 function closeChannelSheet() { document.getElementById('channelOverlay').classList.remove('open'); }
@@ -3985,8 +4050,9 @@ function nowTime() {
 function numPeers() { return Object.keys(peers).length; }
 function updatePeers() {
   var n = numPeers();
-  peerCt.textContent = n > 0 ? n + ' online' : '';
-  peerCt.classList.toggle('has-peers', n > 0);
+  var total = myRoom ? n + 1 : 0;
+  peerCt.textContent = total > 0 ? total + ' នាក់' : '';
+  peerCt.classList.toggle('has-peers', total > 1);
 }
 function copyChannelLink() {
   if (!myRoom) { showToast('Join a channel first'); return; }
@@ -4227,6 +4293,7 @@ socket.on('disconnect', function () {
   }
 });
 socket.on('connect_error', function () { wtSetConnectionState('reconnecting', 'Reconnecting...'); });
+socket.on('connect', function () { socket.emit('channels_list', {}); loadChannelList(); });
 
 socket.on('room_state', function (data) {
   peers = {};
@@ -4243,14 +4310,8 @@ socket.on('room_state', function (data) {
     setStatus(numPeers() > 0 ? names+extra+' online' : 'Waiting for others...', numPeers() > 0 ? 'ok' : 'warn');
     if (!isLive) startLive().catch(function() { setTalkMode('hold'); });
   } else {
-    if (myRoom === 'AI-BOT') {
-      setStatus('AI Assistant is online', 'ok');
-      chDot.className = 'ch-dot online';
-      pttHint.textContent = 'Hold to transmit';
-    } else {
-      setStatus(numPeers() > 0 ? names+extra+' online' : 'Waiting for others...', numPeers() > 0 ? 'ok' : 'warn');
-      pttHint.textContent = 'Hold to transmit';
-    }
+    setStatus(numPeers() > 0 ? names+extra+' online' : 'Waiting for others...', numPeers() > 0 ? 'ok' : 'warn');
+    pttHint.textContent = 'Hold to transmit';
   }
 });
 socket.on('peer_joined', function (data) {
@@ -4347,6 +4408,19 @@ socket.on('ai_chat_error', function (data) {
   data = data || {};
   aiFinishPending(data.msg_id || '');
   aiAddMessage('assistant', data.error || data.msg || 'AI chat error');
+});
+
+
+socket.on('channels_state', function(data) {
+  data = data || {};
+  _channelList = Array.isArray(data.channels) ? data.channels : [];
+  renderChannelList(_channelList);
+});
+socket.on('channels_expired', function(data) {
+  data = data || {};
+  var expired = Array.isArray(data.channels) ? data.channels : [];
+  if (expired.length) showToast('Expired empty channel: #' + expired[0]);
+  loadChannelList();
 });
 
 // ── Realtime zone sync ──
@@ -5902,9 +5976,11 @@ function screenHandleFatal(err) {
   else screenUpdateUI();
 }
 
-screenWireUI();
+/* Screen sharing removed from this build; legacy code is intentionally not wired. */
+if (false) {
+  screenWireUI();
 
-socket.on('connect', function() {
+  socket.on('connect', function() {
   screenUpdateUI();
   screenRequestState();
 });
@@ -5954,6 +6030,7 @@ socket.on('screen_share_error', function(data) {
   screenSetStatus(msg, data && data.code === 'SCREEN_BUSY' ? 'warn' : 'err');
   if (data && data.screen_share) screenSetShare(data.screen_share);
 });
+}
 
 </script>
 </body>
