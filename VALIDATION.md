@@ -1,45 +1,55 @@
 # Validation notes
 
-Performed in this ChatGPT container:
+Performed in this ChatGPT container for the split deployment package:
 
-- `gofmt -w $(find internal cmd -name '*.go')` completed successfully.
-- Frontend inline JavaScript was extracted from `web/index.html` and checked with:
+- Backend Go formatting:
 
 ```bash
-node --check /mnt/data/frontend-inline-updated.js
+cd backend
+gofmt -w $(find . -name '*.go')
 ```
 
-Result: JavaScript syntax check passed.
+Result: passed.
 
-- `go test ./...` and `go build ./cmd/server` cannot download modules directly in this container because DNS access to `proxy.golang.org` is blocked here.
-- To still catch local compile errors, the same commands were run with temporary local stubs for external packages:
+- Backend compile/test check using local stubs for external modules, because this container cannot reach `proxy.golang.org`:
 
 ```bash
-GOWORK=off go test -modfile=/tmp/wt_go.mod ./...
-GOWORK=off go build -modfile=/tmp/wt_go.mod ./cmd/server
+cd backend
+go mod edit -replace=github.com/gorilla/websocket=/mnt/data/go_stubs/websocket
+go mod edit -replace=github.com/redis/go-redis/v9=/mnt/data/go_stubs/redis
+go test ./...
 ```
 
-Result: compile check passed with stubs.
+Result: passed for all packages.
 
-Run this on your machine or Render/Railway build environment with internet access:
+The real project `go.mod` was restored after the local-stub validation.
+
+- Frontend inline JavaScript syntax check:
 
 ```bash
+node --check /mnt/data/frontend-inline-split.js
+```
+
+Result: passed.
+
+Not completed in this container:
+
+- Real `go mod download`, `go test ./...`, and `go build ./cmd/server` with internet access. This container cannot download from `proxy.golang.org`.
+
+Run this in Render or your machine with internet:
+
+```bash
+cd backend
 go mod download
 go mod tidy
 go test ./...
 go build ./cmd/server
 ```
 
-Feature update completed:
+Split deployment checks:
 
-- Removed AI assistant from active UI.
-- `/ai/chat` now returns `410 Gone` with a clear disabled message.
-- Removed screen-share entry points from active UI.
-- Screen-share WebSocket events now return `FEATURE_DISABLED`.
-- Added `/channels` endpoint.
-- Added realtime `channels_list`, `channels_state`, and `channels_expired` events.
-- Added channel member counts shown as `ចំនួនមនុស្ស` in the channel sheet.
-- Added 15-minute empty channel expiry via `CHANNEL_EMPTY_TTL_SECS=900`.
-- Updated README, `.env.example`, and `render.yaml`.
-
-No secret values are included in this project. Use `.env.example` and rotate any keys/passwords that were previously pasted into chat.
+- Backend no longer registers `/web/` static hosting.
+- Dockerfile no longer copies the `web` folder.
+- Frontend is in `frontend/` for Vercel.
+- Frontend does not use `web/env.js`, `WT_ENV`, or frontend secret keys.
+- Frontend calls the Render backend through `DEFAULT_BACKEND_API_URL` in `frontend/index.html`.

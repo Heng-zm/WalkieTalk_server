@@ -64,7 +64,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/zones", s.handleZones)
 	mux.HandleFunc("/zones/", s.handleZoneByID)
 	mux.HandleFunc("/ws", s.handleWS)
-	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
 	mux.HandleFunc("/socket.io", s.handleSocketIOMigrationNotice)
 	return s.cors(mux)
 }
@@ -85,6 +84,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"mapbox_config":  "/config/mapbox",
 		"websocket_path": "/ws",
 		"socketio_path":  "replaced by /ws native WebSocket",
+		"frontend":       "Deploy frontend/ separately on Vercel",
 		"features": map[string]any{
 			"voice_relay":                  true,
 			"live_voice_chunks":            true,
@@ -96,6 +96,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"redis_rate_fallback":          true,
 			"runtime_stats":                true,
 			"mapbox_env_config":            s.cfg.MapboxAccessToken != "",
+			"static_frontend_hosting":      false,
 			"zone_write_api_key_required":  s.cfg.ZoneWriteRequiresAPIKey,
 		},
 		"events": []string{"join_room", "leave_room", "update_name", "voice_message", "voice_chunk", "voice_stream_end", "channels_list", "channels_state", "channels_expired", "quality_pong"},

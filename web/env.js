@@ -1,7 +1,7 @@
 // Runtime frontend config. Keep this file public-safe.
 // Edit values only when hosting the frontend separately from the Go backend.
 window.WT_ENV = Object.assign({
-  API_BASE_URL: "",
+  API_BASE_URL: "https://walkietalk-server-4pmn.onrender.com/zones",
   WS_URL: "",
   MAPBOX_CONFIG_URL: "",
   DEFAULT_ROOM: "DEMO",

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: walkietalk-go
+    name: walkietalk-go-backend
     env: docker
     plan: free
     autoDeploy: true
@@ -10,18 +10,21 @@ services:
         value: 3000
       - key: ENV
         value: production
+      # Set to your Vercel frontend domain, for example:
+      # https://your-vercel-app.vercel.app
       - key: CORS_ORIGINS
         sync: false
-      - key: PUBLIC_API_KEY
-        sync: false
+      # Optional backend/admin key. Leave unset for public frontend deployments.
+      # - key: PUBLIC_API_KEY
+      #   sync: false
       - key: ZONE_WRITE_REQUIRES_API_KEY
         value: "false"
+      - key: CHANNEL_EMPTY_TTL_SECS
+        value: "900"
       - key: MAX_ZONE_READ_RATE
         value: "60"
       - key: MAX_ZONE_WRITE_RATE
         value: "20"
-      - key: CHANNEL_EMPTY_TTL_SECS
-        value: "900"
       - key: MAPBOX_ACCESS_TOKEN
         sync: false
       - key: SUPABASE_URL

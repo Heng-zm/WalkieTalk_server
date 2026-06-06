@@ -15,7 +15,6 @@ RUN adduser -D -g '' appuser
 USER appuser
 WORKDIR /app
 COPY --from=build /out/walkietalk-go /app/walkietalk-go
-COPY web /app/web
 ENV PORT=3000
 EXPOSE 3000
 CMD ["/app/walkietalk-go"]
