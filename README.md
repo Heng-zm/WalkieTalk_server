@@ -33,21 +33,34 @@ WebSocket messages use this shape:
 
 Your Python server used Socket.IO. This Go version uses native WebSocket because Go Socket.IO libraries are less stable than native WebSocket.
 
-Old frontend:
+The included `web/index.html` has already been updated for the Go backend. It uses a small `WTNativeSocket` wrapper so the existing UI code can still call:
 
 ```js
 socket.emit("join_room", { room, name });
 socket.on("voice_message", handler);
 ```
 
-New frontend:
+Internally the wrapper sends native WebSocket messages like:
 
-```js
-ws.send(JSON.stringify({ event: "join_room", data: { room, name } }));
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.event === "voice_message") console.log(msg.data);
-};
+```json
+{"event":"join_room","data":{"room":"ABC123","name":"kimheng"}}
+```
+
+Optional frontend runtime config:
+
+```html
+<script>
+  window.WT_SERVER_URL = "https://your-go-backend.onrender.com";
+  // Only for private/admin deployments. Do not expose this on public websites.
+  window.WT_PUBLIC_API_KEY = "your-public-api-key";
+</script>
+```
+
+You can also store these in browser localStorage keys:
+
+```txt
+wt_server_url
+wt_public_api_key
 ```
 
 ## Run locally

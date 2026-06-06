@@ -1,38 +1,41 @@
-# Validation
+# Validation notes
 
-This package was patched after the Render error:
+Performed in this ChatGPT container:
 
-```text
-missing go.sum entry for module providing package github.com/gorilla/websocket
-missing go.sum entry for module providing package github.com/redis/go-redis/v9
-```
-
-## What was changed
-
-1. `Dockerfile` now runs `go mod tidy` after copying the full source tree and before `go build`.
-2. Empty `go.sum` is included so local tooling has the expected file.
-3. Fixed a Go compile issue in `internal/realtime/screen.go` where `s := ...` was missing inside `anyBool()`.
-4. Fixed WebSocket lifecycle in `internal/api/server.go` by not using `r.Context()` after the WebSocket upgrade.
-
-## Validate locally
+- `gofmt -w $(find . -name '*.go')` completed successfully on the Go source.
+- Frontend inline JavaScript was extracted from `web/index.html` and checked with:
 
 ```bash
+node --check /mnt/data/frontend-inline.js
+```
+
+Result: JavaScript syntax check passed.
+
+- `go.sum` now includes checksums for direct Go dependencies and the go-redis runtime transitive dependencies used by this project:
+  - `github.com/gorilla/websocket v1.5.3`
+  - `github.com/redis/go-redis/v9 v9.7.0`
+  - `github.com/cespare/xxhash/v2 v2.2.0`
+  - `github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f`
+
+Not completed in this container:
+
+- `go test ./...` and `go build ./cmd/server` could not download modules because this container cannot reach `proxy.golang.org`.
+
+Run this on your machine or Render/Railway build environment with internet access:
+
+```bash
+go mod download
 go mod tidy
-gofmt -w cmd/server/main.go internal/**/*.go
 go test ./...
-go build -trimpath -ldflags="-s -w" -o walkietalk-go ./cmd/server
+go build ./cmd/server
 ```
 
-## Validate Docker build
+Frontend migration completed:
 
-```bash
-docker build --no-cache -t walkietalk-go .
-docker run --rm -p 3000:3000 --env-file .env walkietalk-go
-```
+- Removed Socket.IO CDN dependency.
+- Added native WebSocket wrapper for `/ws`.
+- Preserved the old `socket.emit(...)` and `socket.on(...)` frontend API style.
+- Updated WebRTC signaling payloads to send `target_sid` for the Go backend.
+- Added optional `WT_PUBLIC_API_KEY` / `wt_public_api_key` support for protected admin endpoints.
 
-Then open:
-
-```text
-http://localhost:3000/health
-http://localhost:3000/web/index.html
-```
+No secret values are included in this project. Use `.env.example` and rotate any keys/passwords that were previously pasted into chat.

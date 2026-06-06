@@ -292,18 +292,35 @@ func (s *Server) postZone(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = util.RandomID("zone_")
 	}
+	radius := body["radius"]
+	if radius == nil {
+		radius = body["radius_m"]
+	}
+	name := util.CleanSmallText(anyString(body["name"]), 80)
+	channel := util.CleanSmallText(anyString(body["channel"]), 80)
+	if channel == "" {
+		channel = name
+	}
+	if name == "" {
+		name = channel
+	}
+	if name == "" {
+		name = "Zone"
+	}
+	if channel == "" {
+		channel = "ZONE"
+	}
 	zone := map[string]any{
 		"id":         id,
 		"device_id":  deviceID,
-		"name":       util.CleanSmallText(anyString(body["name"]), 80),
-		"color":      util.CleanColor(anyString(body["color"])),
+		"name":       name,
+		"channel":    channel,
 		"lat":        body["lat"],
 		"lng":        body["lng"],
-		"radius_m":   body["radius_m"],
-		"updated_at": time.Now().UTC().Format(time.RFC3339),
-	}
-	if zone["name"] == "" {
-		zone["name"] = "Zone"
+		"radius":     radius,
+		"color":      util.CleanColor(anyString(body["color"])),
+		"auto_join":  anyBool(body["auto_join"], true),
+		"created_by": util.CleanSmallText(anyString(body["created_by"]), 80),
 	}
 	if body["expires_at"] != nil && anyString(body["expires_at"]) != "" {
 		zone["expires_at"] = anyString(body["expires_at"])
@@ -430,6 +447,22 @@ func anyString(v any) string {
 		return s
 	}
 	return fmt.Sprint(v)
+}
+
+func anyBool(v any, fallback bool) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.ToLower(strings.TrimSpace(t))
+		if s == "1" || s == "true" || s == "yes" || s == "on" {
+			return true
+		}
+		if s == "0" || s == "false" || s == "no" || s == "off" {
+			return false
+		}
+	}
+	return fallback
 }
 
 func clientIP(r *http.Request) string {
