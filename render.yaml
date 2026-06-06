@@ -21,6 +21,23 @@ services:
         value: "false"
       - key: CHANNEL_EMPTY_TTL_SECS
         value: "900"
+      - key: KEEP_ALIVE_ENABLED
+        value: "true"
+      # Set this to your live Render backend URL after first deploy, for example:
+      # https://walkietalk-server-4pmn.onrender.com
+      - key: KEEP_ALIVE_URL
+        sync: false
+      - key: KEEP_ALIVE_PATH
+        value: /webhook/keepalive
+      - key: KEEP_ALIVE_INTERVAL_SECS
+        value: "300"
+      - key: KEEP_ALIVE_TIMEOUT_SECS
+        value: "8"
+      # Optional secret. If set, external cron must send ?token=... or X-Keep-Alive-Token.
+      # - key: KEEP_ALIVE_TOKEN
+      #   sync: false
+      - key: READINESS_CACHE_SECS
+        value: "20"
       - key: MAX_ZONE_READ_RATE
         value: "60"
       - key: MAX_ZONE_WRITE_RATE

@@ -60,8 +60,13 @@ type Config struct {
 	MaxZoneReadRate         int
 	MaxZoneWriteRate        int
 
+	KeepAliveEnabled  bool
 	KeepAliveURL      string
+	KeepAlivePath     string
 	KeepAliveInterval time.Duration
+	KeepAliveTimeout  time.Duration
+	KeepAliveToken    string
+	ReadinessCacheTTL time.Duration
 	InstanceID        string
 }
 
@@ -111,10 +116,26 @@ func Load() Config {
 		ZoneWriteRequiresAPIKey:      envBool("ZONE_WRITE_REQUIRES_API_KEY", false),
 		MaxZoneReadRate:              envInt("MAX_ZONE_READ_RATE", 60, 1, 600),
 		MaxZoneWriteRate:             envInt("MAX_ZONE_WRITE_RATE", 20, 1, 120),
-		KeepAliveURL:                 strings.TrimRight(firstNonEmpty(env("RENDER_EXTERNAL_URL", ""), env("SERVER_URL", "")), "/"),
-		KeepAliveInterval:            10 * time.Minute,
+		KeepAliveEnabled:             envBool("KEEP_ALIVE_ENABLED", true),
+		KeepAliveURL:                 strings.TrimRight(firstNonEmpty(env("KEEP_ALIVE_URL", ""), env("RENDER_EXTERNAL_URL", ""), env("SERVER_URL", "")), "/"),
+		KeepAlivePath:                cleanPath(env("KEEP_ALIVE_PATH", "/webhook/keepalive")),
+		KeepAliveInterval:            time.Duration(envInt("KEEP_ALIVE_INTERVAL_SECS", 300, 60, 3600)) * time.Second,
+		KeepAliveTimeout:             time.Duration(envFloat("KEEP_ALIVE_TIMEOUT_SECS", 8, 1, 60)) * time.Second,
+		KeepAliveToken:               env("KEEP_ALIVE_TOKEN", ""),
+		ReadinessCacheTTL:            time.Duration(envInt("READINESS_CACHE_SECS", 20, 0, 300)) * time.Second,
 		InstanceID:                   "inst_" + randomHex(6),
 	}
+}
+
+func cleanPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	return value
 }
 
 func env(key, fallback string) string {

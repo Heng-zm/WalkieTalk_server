@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -32,9 +33,21 @@ type Server struct {
 	start    time.Time
 	client   *http.Client
 	upgrader websocket.Upgrader
+
+	readyMu      sync.Mutex
+	readyCached  map[string]any
+	readyExpires time.Time
 }
 
 func NewServer(cfg config.Config, hub *realtime.Hub, aiClient *ai.Client, rate *store.RateStore, logger *log.Logger) *Server {
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          128,
+		MaxIdleConnsPerHost:   32,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	s := &Server{
 		cfg:    cfg,
 		hub:    hub,
@@ -42,7 +55,7 @@ func NewServer(cfg config.Config, hub *realtime.Hub, aiClient *ai.Client, rate *
 		rate:   rate,
 		log:    logger,
 		start:  time.Now(),
-		client: &http.Client{Timeout: 20 * time.Second},
+		client: &http.Client{Timeout: 20 * time.Second, Transport: transport},
 	}
 	s.upgrader = websocket.Upgrader{
 		ReadBufferSize:  4096,
@@ -57,6 +70,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
+	mux.HandleFunc("/webhook/keepalive", s.handleKeepAliveWebhook)
+	mux.HandleFunc("/hooks/keepalive", s.handleKeepAliveWebhook)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/config/mapbox", s.handleMapboxConfig)
 	mux.HandleFunc("/channels", s.handleChannels)
@@ -78,6 +93,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"status":         "ok",
 		"health":         "/health",
 		"ready":          "/ready",
+		"keepalive":      "/webhook/keepalive",
 		"stats":          "/stats",
 		"zones":          "/zones",
 		"channels":       "/channels",
@@ -98,41 +114,101 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"mapbox_env_config":            s.cfg.MapboxAccessToken != "",
 			"static_frontend_hosting":      false,
 			"zone_write_api_key_required":  s.cfg.ZoneWriteRequiresAPIKey,
+			"keepalive_webhook":            true,
+			"keepalive_self_ping":          s.cfg.KeepAliveEnabled && s.cfg.KeepAliveURL != "",
+			"readiness_cache_seconds":      int(s.cfg.ReadinessCacheTTL.Seconds()),
 		},
 		"events": []string{"join_room", "leave_room", "update_name", "voice_message", "voice_chunk", "voice_stream_end", "channels_list", "channels_state", "channels_expired", "quality_pong"},
 	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	stats := s.hub.Stats()
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"status":                      "ok",
 		"instance":                    s.cfg.InstanceID,
-		"connections":                 s.hub.Stats()["local_users"],
-		"rooms_local":                 s.hub.RoomsSnapshot(),
-		"channels_local":              s.hub.ChannelsSnapshot(),
-		"redis":                       s.rate.RedisOK(r.Context()),
+		"connections":                 stats["local_users"],
+		"channels_count":              len(s.hub.ChannelsSnapshot()),
+		"redis":                       s.rate.Stats(),
 		"supabase_configured":         s.cfg.SupabaseURL != "" && s.cfg.SupabaseKey != "",
 		"ai_configured":               false,
 		"ai_key_configured":           false,
 		"mapbox_configured":           s.cfg.MapboxAccessToken != "",
+		"keepalive_webhook":           "/webhook/keepalive",
 		"zone_write_api_key_required": s.cfg.ZoneWriteRequiresAPIKey,
 		"uptime_s":                    int(time.Since(s.start).Seconds()),
 	})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	if s.cfg.ReadinessCacheTTL > 0 {
+		s.readyMu.Lock()
+		if s.readyCached != nil && now.Before(s.readyExpires) {
+			cached := cloneMap(s.readyCached)
+			s.readyMu.Unlock()
+			cached["cache"] = "hit"
+			s.writeJSON(w, http.StatusOK, cached)
+			return
+		}
+		s.readyMu.Unlock()
+	}
+
 	redisOK := any(nil)
 	if s.cfg.RedisEnabled && s.cfg.RedisURL != "" {
-		redisOK = s.rate.RedisOK(r.Context())
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		redisOK = s.rate.RedisOK(ctx)
+		cancel()
 	}
 	supabaseOK := any(nil)
 	if s.cfg.SupabaseURL != "" && s.cfg.SupabaseKey != "" {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		resp, err := s.supabaseRequest(ctx, http.MethodGet, "/rest/v1/geo_zones?limit=1&select=id", nil, nil)
+		cancel()
 		supabaseOK = err == nil && resp >= 200 && resp < 300
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "instance": s.cfg.InstanceID, "redis": redisOK, "supabase": supabaseOK, "mapbox": s.cfg.MapboxAccessToken != "", "websocket": true, "uptime_s": int(time.Since(s.start).Seconds())})
+	data := map[string]any{
+		"ok": true, "instance": s.cfg.InstanceID, "redis": redisOK, "supabase": supabaseOK,
+		"mapbox": s.cfg.MapboxAccessToken != "", "websocket": true, "uptime_s": int(time.Since(s.start).Seconds()), "cache": "miss",
+	}
+	if s.cfg.ReadinessCacheTTL > 0 {
+		s.readyMu.Lock()
+		s.readyCached = cloneMap(data)
+		s.readyExpires = now.Add(s.cfg.ReadinessCacheTTL)
+		s.readyMu.Unlock()
+	}
+	s.writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleKeepAliveWebhook(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodPost, http.MethodHead:
+	default:
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if s.cfg.KeepAliveToken != "" && !s.validKeepAliveToken(r) {
+		s.writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+		return
+	}
+	if !s.rate.Check(r.Context(), "keepalive:"+clientIP(r), 180, time.Minute) {
+		s.writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "too many keepalive calls"})
+		return
+	}
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	stats := s.hub.Stats()
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"status":      "awake",
+		"instance":    s.cfg.InstanceID,
+		"uptime_s":    int(time.Since(s.start).Seconds()),
+		"connections": stats["local_users"],
+		"channels":    len(s.hub.ChannelsSnapshot()),
+	})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -545,6 +621,31 @@ func (s *Server) supabaseRequestBody(ctx context.Context, method, path string, b
 	return 0, nil, lastErr
 }
 
+func (s *Server) validKeepAliveToken(r *http.Request) bool {
+	token := strings.TrimSpace(r.Header.Get("X-Keep-Alive-Token"))
+	if token == "" {
+		token = strings.TrimSpace(r.Header.Get("X-Webhook-Token"))
+	}
+	if token == "" {
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+			token = strings.TrimSpace(auth[7:])
+		}
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	return token != "" && token == s.cfg.KeepAliveToken
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func (s *Server) authorized(r *http.Request) bool {
 	if s.cfg.PublicAPIKey == "" {
 		return true
@@ -567,8 +668,8 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			}
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Api-Key,X-Device-Id,X-WT-Device-Id")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,HEAD,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Api-Key,X-Device-Id,X-WT-Device-Id,X-Keep-Alive-Token,X-Webhook-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

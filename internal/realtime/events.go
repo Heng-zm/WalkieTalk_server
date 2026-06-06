@@ -38,6 +38,8 @@ func (h *Hub) HandleEvent(ctx context.Context, c *Client, env Envelope) {
 		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "AI assistant was removed from this version"})
 	case "quality_pong":
 		h.handleQualityPong(c.SID, data)
+	case "msg_delivered", "message_delivered", "msg_read", "message_read", "msg_seen", "message_seen":
+		h.handleMessageAck(c.SID, strings.TrimSpace(env.Event), data)
 	case "screen_share_start", "screen_share_stop", "screen_share_state", "screen_viewer_ready", "screen_offer", "screen_answer", "screen_ice_candidate":
 		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "Screen sharing was removed from this version"})
 	default:
@@ -215,6 +217,42 @@ func (h *Hub) handleAIChat(ctx context.Context, sid string, data map[string]any)
 		}
 		h.Send(sid, "ai_chat_response", map[string]any{"msg_id": msgID, "text": res.Text, "sender_name": "AI Assistant"})
 	}()
+}
+
+func (h *Hub) handleMessageAck(sid, event string, data map[string]any) {
+	msgID := trim(anyString(data["msg_id"]), 80)
+	targetSID := trim(firstNonEmptyString(anyString(data["to"]), anyString(data["target_sid"]), anyString(data["sender_sid"])), 80)
+	room, name := h.roomName(sid)
+	if msgID == "" || targetSID == "" || room == "" || targetSID == sid {
+		return
+	}
+
+	h.mu.RLock()
+	targetUser := h.users[targetSID]
+	targetClient := h.clients[targetSID]
+	sameRoom := targetUser != nil && targetUser.Room == room && targetClient != nil
+	h.mu.RUnlock()
+	if !sameRoom {
+		return
+	}
+
+	h.Send(targetSID, event, map[string]any{
+		"msg_id":       msgID,
+		"from":         sid,
+		"from_sid":     sid,
+		"from_name":    name,
+		"target_sid":   targetSID,
+		"delivered_at": float64(time.Now().UnixNano()) / 1e9,
+	})
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func decodeMap(raw json.RawMessage) map[string]any {
