@@ -1,6 +1,6 @@
-# អាយកូម Backend — Render
+# Aikom Backend — Render
 
-Go API + native WebSocket server for អាយកូម.
+Go API + native WebSocket server for Aikom.
 
 This backend is designed to be deployed separately from the frontend:
 
@@ -26,6 +26,24 @@ The backend does **not** serve the frontend. `/web/index.html` is intentionally 
 - Supabase REST integration for `geo_zones`
 - AI assistant removed/disabled
 - Screen-share signaling removed/disabled
+
+
+## Message acknowledgement events
+
+The backend now accepts safe delivery/read acknowledgement events from the frontend, including:
+
+```txt
+msg_delivered
+message_delivered
+msg_read
+message_read
+msg_seen
+message_seen
+msg_received
+message_received
+```
+
+These events are forwarded only to the original sender when both users are online in the same channel. Invalid, offline, or stale ACKs are ignored silently so the client will not receive `UNKNOWN_EVENT` for normal message lifecycle signals.
 
 ## Render environment
 
@@ -173,4 +191,4 @@ The backend creates the channel, generates an invite code, and sends it back to 
 }
 ```
 
-Invalid private joins return Khmer-friendly error code `PRIVATE_CHANNEL`.
+Invalid private joins return English-friendly error code `PRIVATE_CHANNEL`.

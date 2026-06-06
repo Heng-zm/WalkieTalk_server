@@ -451,7 +451,7 @@ func (h *Hub) prepareChannelJoinLocked(room, sid, name string, data map[string]a
 		validInvite := state.InviteCode != "" && strings.EqualFold(secret, state.InviteCode)
 		validPIN := state.PINHash != "" && pin != "" && hashChannelPIN(pin) == state.PINHash
 		if !validInvite && !validPIN {
-			return state, "PRIVATE_CHANNEL", "ឆានែលឯកជន ត្រូវការកូដអញ្ជើញ ឬ PIN ត្រឹមត្រូវ"
+			return state, "PRIVATE_CHANNEL", "Private channel requires a valid invite code or PIN"
 		}
 	}
 	return state, "", ""
@@ -464,9 +464,9 @@ func (h *Hub) isRoomMemberLocked(room, sid string) bool {
 
 func cleanChannelVisibility(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "private", "locked", "secret", "ឯកជន":
+	case "private", "locked", "secret":
 		return "private"
-	case "public", "open", "សាធារណៈ":
+	case "public", "open":
 		return "public"
 	default:
 		return ""
