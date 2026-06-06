@@ -1,12 +1,12 @@
 # Validation notes
 
-Performed in this ChatGPT container after the message acknowledgement fix:
+Performed in this ChatGPT container after the frontend brand/channel-type update:
 
 - `gofmt -w $(find backend -name '*.go')` completed successfully.
 - Frontend inline JavaScript was extracted from `frontend/index.html` and checked with:
 
 ```bash
-node --check /mnt/data/frontend-inline-ack-fix.js
+node --check /mnt/data/frontend-inline-brand-channel.js
 ```
 
 Result: JavaScript syntax check passed.
@@ -35,18 +35,23 @@ go test ./...
 go build ./cmd/server
 ```
 
-Message acknowledgement fix validated:
+Frontend update validated:
 
-- Added backend support for `msg_delivered`, `message_delivered`, `msg_read`, `message_read`, `msg_seen`, and `message_seen`.
-- Acknowledgement events are no longer reported as `UNKNOWN_EVENT`.
-- Acknowledgements are safely ignored when missing `msg_id`, missing target SID, target is offline, or target is outside the sender's current room.
-- When valid, acknowledgement events are forwarded only to the original sender in the same channel.
+- Website/PWA title and manifest name changed to `អាយកូម`.
+- Header now shows the `អាយកូម` brand name next to the app mark.
+- Khmer-friendly Google font stack added with `Noto Sans Khmer`.
+- Channel sheet now lets users select `សាធារណៈ / Public` or `ឯកជន / Private`.
+- Channel list displays public/private labels and `ចំនួនមនុស្ស` count.
+- Join/create sends `visibility` and `channel_type` to the backend.
 
-Keep-alive/performance changes retained:
+Backend channel metadata update validated:
 
+- `ChannelState` now includes `visibility`.
+- `/channels` includes each channel visibility.
+- `join_room` preserves channel visibility metadata for the channel list.
+
+Previous fixes retained:
+
+- Message acknowledgement events are supported and no longer reported as `UNKNOWN_EVENT`.
 - `/webhook/keepalive` and `/hooks/keepalive` endpoints remain available.
-- Optional `KEEP_ALIVE_TOKEN` validation remains supported via query token, `X-Keep-Alive-Token`, `X-Webhook-Token`, or Bearer token.
-- Internal self-ping loop remains controlled by `KEEP_ALIVE_URL`, `KEEP_ALIVE_PATH`, and `KEEP_ALIVE_INTERVAL_SECS`.
-- `/health` remains lightweight.
-- `/ready` dependency checks remain cached by `READINESS_CACHE_SECS`.
-- Pooled HTTP transport for outbound backend calls remains enabled.
+- `/health` remains lightweight and `/ready` remains cached by `READINESS_CACHE_SECS`.

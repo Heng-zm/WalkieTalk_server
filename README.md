@@ -149,3 +149,12 @@ https://walkietalk-server-4pmn.onrender.com/webhook/keepalive?token=your-random-
 ```
 
 The `/health` endpoint is intentionally cheap and does not ping Redis/Supabase on every request. Use `/ready` for dependency checks; it is cached by `READINESS_CACHE_SECS`.
+
+
+## Frontend brand/channel type update
+
+- Frontend/PWA name changed to `អាយកូម`.
+- Added Khmer-friendly Google font stack using `Noto Sans Khmer`.
+- Channel sheet supports `សាធារណៈ / Public` and `ឯកជន / Private`.
+- Channel list shows visibility and `ចំនួនមនុស្ស`.
+- Backend channel snapshots now include `visibility`.

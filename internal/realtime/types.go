@@ -41,6 +41,7 @@ type QualityState struct {
 
 type ChannelState struct {
 	Name       string       `json:"name"`
+	Visibility string       `json:"visibility"`
 	UserCount  int          `json:"user_count"`
 	Members    []RoomMember `json:"members,omitempty"`
 	CreatedAt  time.Time    `json:"created_at"`

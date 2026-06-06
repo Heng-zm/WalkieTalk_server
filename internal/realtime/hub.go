@@ -269,6 +269,9 @@ func (h *Hub) channelsSnapshotLocked() []ChannelState {
 		}
 		copyState := *state
 		copyState.Name = name
+		if copyState.Visibility == "" {
+			copyState.Visibility = "public"
+		}
 		copyState.UserCount = len(h.rooms[name])
 		copyState.Members = h.membersLocked(name)
 		if copyState.UserCount == 0 && copyState.EmptySince != nil {
@@ -310,14 +313,20 @@ func (h *Hub) BroadcastChannelsState() {
 	h.BroadcastAll("channels_state", h.channelPayload())
 }
 
-func (h *Hub) touchChannelLocked(room string, now time.Time) {
+func (h *Hub) touchChannelLocked(room string, now time.Time, visibility string) {
 	if room == "" {
 		return
 	}
 	state := h.channels[room]
 	if state == nil {
-		state = &ChannelState{Name: room, CreatedAt: now}
+		state = &ChannelState{Name: room, Visibility: visibility, CreatedAt: now}
 		h.channels[room] = state
+	}
+	if visibility == "" {
+		visibility = "public"
+	}
+	if state.Visibility == "" || state.UserCount == 0 {
+		state.Visibility = visibility
 	}
 	state.UserCount = len(h.rooms[room])
 	state.LastActive = now
@@ -331,8 +340,11 @@ func (h *Hub) markChannelEmptyLocked(room string, now time.Time) {
 	}
 	state := h.channels[room]
 	if state == nil {
-		state = &ChannelState{Name: room, CreatedAt: now}
+		state = &ChannelState{Name: room, Visibility: "public", CreatedAt: now}
 		h.channels[room] = state
+	}
+	if state.Visibility == "" {
+		state.Visibility = "public"
 	}
 	state.UserCount = 0
 	state.LastActive = now
@@ -410,7 +422,7 @@ func (h *Hub) leaveNoBroadcast(sid string) (string, string) {
 			delete(h.rooms, room)
 			h.markChannelEmptyLocked(room, time.Now())
 		} else {
-			h.touchChannelLocked(room, time.Now())
+			h.touchChannelLocked(room, time.Now(), "")
 		}
 	}
 	delete(h.users, sid)

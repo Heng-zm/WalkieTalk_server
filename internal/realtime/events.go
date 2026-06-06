@@ -47,9 +47,22 @@ func (h *Hub) HandleEvent(ctx context.Context, c *Client, env Envelope) {
 	}
 }
 
+func cleanChannelVisibility(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "private", "locked", "secret":
+		return "private"
+	default:
+		return "public"
+	}
+}
+
 func (h *Hub) handleJoin(sid string, data map[string]any) {
 	room := util.CleanRoom(anyString(data["room"]), h.cfg.MaxRoomLen)
 	name := util.CleanName(anyString(data["name"]), sidPrefix(sid), h.cfg.MaxNameLen)
+	visibility := cleanChannelVisibility(anyString(data["visibility"]))
+	if visibility == "public" {
+		visibility = cleanChannelVisibility(anyString(data["channel_type"]))
+	}
 	if room == "" {
 		return
 	}
@@ -70,13 +83,13 @@ func (h *Hub) handleJoin(sid string, data map[string]any) {
 	}
 	h.rooms[room][sid] = true
 	h.users[sid] = &User{SID: sid, Name: name, Room: room, JoinedAt: now}
-	h.touchChannelLocked(room, now)
+	h.touchChannelLocked(room, now, visibility)
 	members := h.membersLocked(room)
 	userCount := len(members)
 	h.mu.Unlock()
 
 	h.Broadcast(room, "peer_joined", map[string]any{"sid": sid, "name": name}, sid)
-	h.Send(sid, "room_state", map[string]any{"members": members, "user_count": userCount})
+	h.Send(sid, "room_state", map[string]any{"members": members, "user_count": userCount, "visibility": visibility})
 	h.BroadcastChannelsState()
 	h.log.Printf("join sid=%s name=%s room=%s n=%d", sid, name, room, userCount)
 }
