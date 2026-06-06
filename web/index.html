@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WalkieTalk Go WebSocket Test</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#0b1020; color:#eaf0ff; }
+    main { max-width: 900px; margin: 0 auto; padding: 24px; }
+    input, button, textarea { font: inherit; border-radius: 10px; border: 1px solid #334; padding: 10px; }
+    input, textarea { background:#111936; color:#eaf0ff; width: 100%; box-sizing: border-box; }
+    button { background:#3b82f6; color:white; border:0; cursor:pointer; }
+    button.secondary { background:#334155; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .row { display:flex; gap:10px; margin:12px 0; flex-wrap:wrap; }
+    .card { background:#111936; border:1px solid #223; border-radius:16px; padding:16px; margin:12px 0; }
+    #log { white-space:pre-wrap; background:#050817; border-radius:12px; padding:12px; height:320px; overflow:auto; }
+    @media(max-width:720px){ .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WalkieTalk Go Test</h1>
+  <div class="card grid">
+    <label>Server URL <input id="server" value="ws://localhost:3000/ws"></label>
+    <label>Room <input id="room" value="DEMO"></label>
+    <label>Name <input id="name" value="kimheng"></label>
+    <label>AI Message <input id="aiText" value="Hello AI"></label>
+  </div>
+  <div class="row">
+    <button onclick="connect()">Connect</button>
+    <button onclick="joinRoom()">Join Room</button>
+    <button onclick="sendAI()">Send AI</button>
+    <button onclick="sendTestVoice()" class="secondary">Send Test Voice Payload</button>
+    <button onclick="disconnect()" class="secondary">Disconnect</button>
+  </div>
+  <div class="card">
+    <textarea id="custom" rows="4">{"event":"screen_share_state","data":{}}</textarea>
+    <div class="row"><button onclick="sendCustom()">Send Custom JSON</button></div>
+  </div>
+  <div id="log"></div>
+</main>
+<script>
+let ws;
+function log(...args) {
+  const el = document.getElementById('log');
+  el.textContent += args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ') + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function connect() {
+  disconnect();
+  ws = new WebSocket(document.getElementById('server').value.trim());
+  ws.onopen = () => log('OPEN');
+  ws.onclose = () => log('CLOSE');
+  ws.onerror = e => log('ERROR', e.message || e.type);
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    log('RECV', msg);
+    if (msg.event === 'quality_ping') {
+      send('quality_pong', { nonce: msg.data && msg.data.nonce });
+    }
+  };
+}
+function disconnect() { if (ws) { ws.close(); ws = null; } }
+function send(event, data) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return log('not connected');
+  ws.send(JSON.stringify({ event, data }));
+  log('SEND', { event, data });
+}
+function joinRoom() {
+  send('join_room', { room: document.getElementById('room').value, name: document.getElementById('name').value });
+}
+function sendAI() {
+  send('ai_chat_message', { msg_id: String(Date.now()), text: document.getElementById('aiText').value });
+}
+function sendTestVoice() {
+  send('voice_message', { msg_id: String(Date.now()), audio: btoa('test audio payload'), mime: 'audio/webm', duration: 1.2 });
+}
+function sendCustom() {
+  try {
+    const msg = JSON.parse(document.getElementById('custom').value);
+    send(msg.event, msg.data || {});
+  } catch (e) { log('bad custom JSON', e.message); }
+}
+</script>
+</body>
+</html>
