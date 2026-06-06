@@ -27,7 +27,7 @@ WebSocket messages use this shape:
 - Local rate limit fallback
 - Optional Redis distributed rate limiting
 - Supabase REST integration for `geo_zones`
-- Production CORS and optional `PUBLIC_API_KEY` protection
+- Production CORS, optional `PUBLIC_API_KEY` protection, and device-scoped zone sync
 
 ## Important migration note
 
@@ -46,17 +46,18 @@ Internally the wrapper sends native WebSocket messages like:
 {"event":"join_room","data":{"room":"ABC123","name":"kimheng"}}
 ```
 
-Optional frontend runtime config:
+Optional frontend runtime config is loaded from `web/env.js`. Keep it public-safe:
 
-```html
-<script>
-  window.WT_SERVER_URL = "https://your-go-backend.onrender.com";
-  // Only for private/admin deployments. Do not expose this on public websites.
-  window.WT_PUBLIC_API_KEY = "your-public-api-key";
-</script>
+```js
+window.WT_ENV = {
+  API_BASE_URL: "https://your-go-backend.onrender.com",
+  WS_URL: "",
+  MAPBOX_CONFIG_URL: "https://your-go-backend.onrender.com/config/mapbox",
+  PUBLIC_API_KEY: ""
+};
 ```
 
-You can also store these in browser localStorage keys:
+When the frontend is served from the same Go backend at `/web/index.html`, it uses the same origin automatically. For static hosting, set `WT_ENV.API_BASE_URL` in `web/env.js` or store these browser localStorage keys:
 
 ```txt
 wt_server_url
@@ -116,14 +117,19 @@ REDIS_ENABLED="True\n"
 
 ## Security
 
-Set `PUBLIC_API_KEY` in production. When set, the server protects:
+`PUBLIC_API_KEY` protects admin/private HTTP endpoints:
 
 - `/stats`
-- `POST /zones`
-- `DELETE /zones/{id}`
 - `/ai/chat`
 
-Send it from trusted admin clients only:
+Zone writes are device-scoped and public by default so the normal browser app can save zones without causing `401 Unauthorized`. To protect zone writes too, set:
+
+```env
+ZONE_WRITE_REQUIRES_API_KEY=true
+PUBLIC_API_KEY=your-private-key
+```
+
+Then send the key from trusted clients only:
 
 ```bash
 curl -H "X-Api-Key: your-key" https://your-server/stats
@@ -179,22 +185,47 @@ Server -> client:
 
 ## Supabase table example
 
+The full safe migration is included in `sql/geo_zones.sql`. You can paste it into Supabase SQL Editor. Core schema:
+
 ```sql
 create table if not exists public.geo_zones (
   id text primary key,
   device_id text not null,
   name text not null default 'Zone',
+  channel text not null default 'ZONE',
   color text not null default '#007aff',
-  lat double precision,
-  lng double precision,
-  radius_m double precision,
+  lat double precision not null,
+  lng double precision not null,
+  radius_m double precision not null default 300,
+  auto_join boolean not null default true,
+  created_by text,
   expires_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists geo_zones_device_id_idx on public.geo_zones(device_id);
+create index if not exists geo_zones_expires_at_idx on public.geo_zones(expires_at);
+
+create or replace function public.set_geo_zones_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_geo_zones_updated_at on public.geo_zones;
+create trigger trg_geo_zones_updated_at
+before update on public.geo_zones
+for each row execute function public.set_geo_zones_updated_at();
 ```
+
+## Zone sync notes
+
+- `GET /zones` should include `device_id` as a query param or `X-Device-Id` header. Missing `device_id` now returns an empty zone list instead of hard-failing with `400`.
+- `POST /zones` validates `lat`, `lng`, and `radius_m`. It tries modern and legacy Supabase column variants so older tables do not fail immediately on unknown columns.
+- The frontend sends both `device_id` query/header and `device_id` in the JSON body.
 
 ## Production notes
 

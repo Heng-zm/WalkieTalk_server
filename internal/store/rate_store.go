@@ -127,30 +127,51 @@ func (s *RateStore) checkLocal(key string, limit int, window time.Duration) bool
 }
 
 func (s *RateStore) redisCircuitOpen() bool {
-	return !s.redisCircuitUntil.IsZero() && time.Now().Before(s.redisCircuitUntil)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.redisCircuitOpenLocked(time.Now())
+}
+
+func (s *RateStore) redisCircuitOpenLocked(now time.Time) bool {
+	return !s.redisCircuitUntil.IsZero() && now.Before(s.redisCircuitUntil)
 }
 
 func (s *RateStore) markRedisSuccess() {
+	s.mu.Lock()
 	s.redisFailures = 0
 	s.redisCircuitUntil = time.Time{}
+	s.mu.Unlock()
 }
 
 func (s *RateStore) markRedisFailure(err error) {
+	now := time.Now()
+	shouldLog := false
+	failures := 0
+	until := time.Time{}
+	s.mu.Lock()
 	s.redisFailures++
+	failures = s.redisFailures
 	if s.redisFailures >= s.cfg.RedisFailureThreshold {
-		s.redisCircuitUntil = time.Now().Add(s.cfg.RedisCircuitOpenSecs)
-		s.log.Printf("redis circuit opened for %s after %d failures: %v", s.cfg.RedisCircuitOpenSecs, s.redisFailures, err)
+		s.redisCircuitUntil = now.Add(s.cfg.RedisCircuitOpenSecs)
+		until = s.redisCircuitUntil
+		shouldLog = true
+	}
+	s.mu.Unlock()
+	if shouldLog {
+		s.log.Printf("redis circuit opened until %s after %d failures: %v", until.Format(time.RFC3339), failures, err)
 	}
 }
 
 func (s *RateStore) Stats() map[string]any {
 	s.mu.Lock()
 	localSize := len(s.local)
+	failures := s.redisFailures
+	circuitOpen := s.redisCircuitOpenLocked(time.Now())
 	s.mu.Unlock()
 	return map[string]any{
 		"redis_enabled":              s.rdb != nil,
-		"redis_circuit_open":         s.redisCircuitOpen(),
-		"redis_consecutive_failures": s.redisFailures,
+		"redis_circuit_open":         circuitOpen,
+		"redis_consecutive_failures": failures,
 		"local_rate_keys":            localSize,
 	}
 }

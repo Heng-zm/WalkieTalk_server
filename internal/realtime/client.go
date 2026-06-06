@@ -26,7 +26,11 @@ type Client struct {
 
 func (c *Client) ReadPump(ctx context.Context) {
 	defer func() {
-		c.Hub.unregister <- c
+		select {
+		case c.Hub.unregister <- c:
+		default:
+			go c.Hub.removeClient(c.SID, "disconnect")
+		}
 		_ = c.Conn.Close()
 	}()
 	c.Conn.SetReadLimit(maxMessageSize)

@@ -37,24 +37,27 @@ type Config struct {
 	AIRetryAttempts   int
 	AIRetryBaseDelay  time.Duration
 
-	MaxRoomSize         int
-	MaxNameLen          int
-	MaxRoomLen          int
-	MaxAudioBytes       int
-	MaxAudioBase64Chars int
-	MaxDuration         time.Duration
-	MaxMsgRate          int
-	MsgRateWindow       time.Duration
-	MaxChunkBytes       int
-	MaxChunkRate        int
-	MaxAITextLen        int
-	MaxAIHistory        int
-	MaxAIChatRate       int
-	MaxScreenSignalRate int
-	MaxScreenSDPChars   int
-	MaxScreenICEChars   int
-	ScreenStateTTL      time.Duration
-	ZoneTTL             time.Duration
+	MaxRoomSize             int
+	MaxNameLen              int
+	MaxRoomLen              int
+	MaxAudioBytes           int
+	MaxAudioBase64Chars     int
+	MaxDuration             time.Duration
+	MaxMsgRate              int
+	MsgRateWindow           time.Duration
+	MaxChunkBytes           int
+	MaxChunkRate            int
+	MaxAITextLen            int
+	MaxAIHistory            int
+	MaxAIChatRate           int
+	MaxScreenSignalRate     int
+	MaxScreenSDPChars       int
+	MaxScreenICEChars       int
+	ScreenStateTTL          time.Duration
+	ZoneTTL                 time.Duration
+	ZoneWriteRequiresAPIKey bool
+	MaxZoneReadRate         int
+	MaxZoneWriteRate        int
 
 	KeepAliveURL      string
 	KeepAliveInterval time.Duration
@@ -103,6 +106,9 @@ func Load() Config {
 		MaxScreenICEChars:            envInt("MAX_SCREEN_ICE_CHARS", 16_000, 1_000, 80_000),
 		ScreenStateTTL:               time.Duration(envInt("SCREEN_STATE_TTL", 6*3600, 60, 24*3600)) * time.Second,
 		ZoneTTL:                      time.Duration(envInt("ZONE_TTL_SECS", 5*3600, 300, 7*24*3600)) * time.Second,
+		ZoneWriteRequiresAPIKey:      envBool("ZONE_WRITE_REQUIRES_API_KEY", false),
+		MaxZoneReadRate:              envInt("MAX_ZONE_READ_RATE", 60, 1, 600),
+		MaxZoneWriteRate:             envInt("MAX_ZONE_WRITE_RATE", 20, 1, 120),
 		KeepAliveURL:                 strings.TrimRight(firstNonEmpty(env("RENDER_EXTERNAL_URL", ""), env("SERVER_URL", "")), "/"),
 		KeepAliveInterval:            10 * time.Minute,
 		InstanceID:                   "inst_" + randomHex(6),

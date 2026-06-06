@@ -63,7 +63,18 @@ func (h *Hub) Run(ctx context.Context) {
 }
 
 func (h *Hub) Register(c *Client) {
-	h.register <- c
+	h.mu.RLock()
+	closed := h.closed
+	h.mu.RUnlock()
+	if closed {
+		closeClientSend(c)
+		return
+	}
+	select {
+	case h.register <- c:
+	default:
+		closeClientSend(c)
+	}
 }
 
 func (h *Hub) Close() {
@@ -73,17 +84,27 @@ func (h *Hub) Close() {
 		return
 	}
 	h.closed = true
+	clients := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
-		close(c.Send)
+		clients = append(clients, c)
 	}
+	h.clients = make(map[string]*Client)
+	h.users = make(map[string]*User)
+	h.rooms = make(map[string]map[string]bool)
+	h.screens = make(map[string]*ScreenState)
+	h.quality = make(map[string]*QualityState)
 	h.mu.Unlock()
+
+	for _, c := range clients {
+		closeClientSend(c)
+	}
 }
 
 func (h *Hub) addClient(c *Client) {
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		close(c.Send)
+		closeClientSend(c)
 		return
 	}
 	h.clients[c.SID] = c
@@ -97,13 +118,15 @@ func (h *Hub) addClient(c *Client) {
 func (h *Hub) removeClient(sid, reason string) {
 	room, name := h.leaveNoBroadcast(sid)
 	h.stopScreenShareForSID(sid, reason)
+	var c *Client
 	h.mu.Lock()
-	if c, ok := h.clients[sid]; ok {
+	if existing, ok := h.clients[sid]; ok {
+		c = existing
 		delete(h.clients, sid)
-		close(c.Send)
 	}
 	delete(h.quality, sid)
 	h.mu.Unlock()
+	closeClientSend(c)
 	if room != "" {
 		h.Broadcast(room, "peer_left", map[string]any{"sid": sid, "name": name}, sid)
 	}
@@ -117,9 +140,7 @@ func (h *Hub) Send(sid, event string, data any) {
 	if c == nil {
 		return
 	}
-	select {
-	case c.Send <- makeEnvelope(event, data):
-	default:
+	if !enqueue(c, makeEnvelope(event, data)) {
 		go h.removeClient(sid, "slow_consumer")
 	}
 }
@@ -127,23 +148,18 @@ func (h *Hub) Send(sid, event string, data any) {
 func (h *Hub) Broadcast(room, event string, data any, skipSID string) {
 	env := makeEnvelope(event, data)
 	h.mu.RLock()
-	sids := make([]string, 0, len(h.rooms[room]))
+	clients := make([]*Client, 0, len(h.rooms[room]))
 	for sid := range h.rooms[room] {
-		if sid != skipSID {
-			sids = append(sids, sid)
+		if sid == skipSID {
+			continue
 		}
-	}
-	clients := make([]*Client, 0, len(sids))
-	for _, sid := range sids {
 		if c := h.clients[sid]; c != nil {
 			clients = append(clients, c)
 		}
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		select {
-		case c.Send <- env:
-		default:
+		if !enqueue(c, env) {
 			go h.removeClient(c.SID, "slow_consumer")
 		}
 	}
@@ -158,12 +174,35 @@ func (h *Hub) BroadcastAll(event string, data any) {
 	}
 	h.mu.RUnlock()
 	for _, c := range clients {
-		select {
-		case c.Send <- env:
-		default:
+		if !enqueue(c, env) {
 			go h.removeClient(c.SID, "slow_consumer")
 		}
 	}
+}
+
+func enqueue(c *Client, env Envelope) (ok bool) {
+	if c == nil {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	select {
+	case c.Send <- env:
+		return true
+	default:
+		return false
+	}
+}
+
+func closeClientSend(c *Client) {
+	if c == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	close(c.Send)
 }
 
 func (h *Hub) Stats() map[string]any {

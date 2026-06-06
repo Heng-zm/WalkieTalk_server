@@ -132,8 +132,8 @@ func (c *Client) postJSONWithRetry(ctx context.Context, url string, payload any,
 			req.Header.Set("Authorization", "Bearer "+c.cfg.AIAssistantAPIKey)
 		}
 		resp, err := c.http.Do(req)
-		cancel()
 		if err != nil {
+			cancel()
 			lastErr = err
 			if attempt < c.cfg.AIRetryAttempts {
 				time.Sleep(backoff(attempt, c.cfg.AIRetryBaseDelay))
@@ -143,6 +143,7 @@ func (c *Client) postJSONWithRetry(ctx context.Context, url string, payload any,
 		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
+		cancel()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("AI backend HTTP %d: %s", resp.StatusCode, trim(string(data), 180))
 			if retryableStatus(resp.StatusCode) && attempt < c.cfg.AIRetryAttempts {

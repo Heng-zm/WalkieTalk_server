@@ -5,6 +5,7 @@ window.WT_ENV = {
   WS_URL: "",
   MAPBOX_CONFIG_URL: "https://walkietalk-server-4pmn.onrender.com/config/mapbox",
   DEFAULT_ROOM: "DEMO",
+  // Only needed when ZONE_WRITE_REQUIRES_API_KEY=true or for protected /ai/chat HTTP use.
   PUBLIC_API_KEY: "",
   ENABLE_DEBUG: false
 };

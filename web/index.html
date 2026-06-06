@@ -11,6 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link class="apple-touch-icon" rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%23060608'/%3E%3Crect x='200' y='80' width='112' height='180' rx='56' fill='none' stroke='%23ff9f0a' stroke-width='28'/%3E%3Cpath d='M128 240c0 70.7 57.3 128 128 128s128-57.3 128-128' stroke='%23ff9f0a' stroke-width='28' stroke-linecap='round' fill='none'/%3E%3Cline x1='256' y1='368' x2='256' y2='430' stroke='%23ff9f0a' stroke-width='28' stroke-linecap='round'/%3E%3Cline x1='196' y1='430' x2='316' y2='430' stroke='%23ff9f0a' stroke-width='28' stroke-linecap='round'/%3E%3C/svg%3E">
 <title>WalkieTalk</title>
+<script src="env.js"></script>
 <style>
 :root {
   --bg:        #040407;
@@ -1866,7 +1867,9 @@ window.addEventListener('offline', wtHandleOnlineState);
 // Optional frontend runtime env file:
 //   window.WT_ENV = { API_BASE_URL: 'https://your-backend.onrender.com', PUBLIC_API_KEY: '' }
 var WT_ENV = window.WT_ENV || {};
-var DEFAULT_SERVER_URL = 'https://server-y327.onrender.com';
+var DEFAULT_SERVER_URL = (window.location && /^https?:$/.test(window.location.protocol))
+  ? window.location.origin
+  : 'https://walkietalk-server-4pmn.onrender.com';
 var SERVER_URL  = _cleanServerUrl(
   WT_ENV.API_BASE_URL || window.WT_SERVER_URL || _safeStorageGet('wt_server_url') || DEFAULT_SERVER_URL
 );
@@ -1876,6 +1879,11 @@ var PUBLIC_API_KEY = String(
 function wtAuthHeaders(extra) {
   var headers = Object.assign({}, extra || {});
   if (PUBLIC_API_KEY) headers['X-Api-Key'] = PUBLIC_API_KEY;
+  return headers;
+}
+function wtDeviceHeaders(extra) {
+  var headers = wtAuthHeaders(extra);
+  if (_deviceId) headers['X-Device-Id'] = _deviceId;
   return headers;
 }
 var MAX_REC_SEC = 60;
@@ -3397,7 +3405,7 @@ function _normalizeZoneRow(r) {
 }
 
 function sbFetchZones(onSuccess, onError) {
-  wtFetchJSON(_zonesApiUrl('/zones'), { method: 'GET' }, { timeout: 12000, retries: 2 })
+  wtFetchJSON(_zonesApiUrl('/zones'), { method: 'GET', headers: wtDeviceHeaders({ 'Accept': 'application/json' }) }, { timeout: 12000, retries: 2 })
   .then(function(data) {
     var rows = Array.isArray(data) ? data : (Array.isArray(data.zones) ? data.zones : []);
     onSuccess(rows.map(_normalizeZoneRow).filter(function(z) {
@@ -3425,9 +3433,9 @@ function sbUpsertZone(z, onDone, onError) {
     auto_join:   z.autoJoin !== false,
     created_by:  z.createdBy || myName
   };
-  wtFetchJSON(SERVER_URL + '/zones', {
+  wtFetchJSON(_zonesApiUrl('/zones'), {
     method: 'POST',
-    headers: wtAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: wtDeviceHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload)
   }, { timeout: 15000, retries: 2 })
   .then(function(data) { if (onDone) onDone(data); })
@@ -3440,7 +3448,7 @@ function sbUpsertZone(z, onDone, onError) {
 function sbDeleteZone(id, onError) {
   wtFetchJSON(
     _zonesApiUrl('/zones/' + encodeURIComponent(id)),
-    { method: 'DELETE', headers: wtAuthHeaders() },
+    { method: 'DELETE', headers: wtDeviceHeaders() },
     { timeout: 12000, retries: 2 }
   )
   .catch(function(e) {

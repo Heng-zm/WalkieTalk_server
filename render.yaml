@@ -14,6 +14,12 @@ services:
         sync: false
       - key: PUBLIC_API_KEY
         sync: false
+      - key: ZONE_WRITE_REQUIRES_API_KEY
+        value: "false"
+      - key: MAX_ZONE_READ_RATE
+        value: "60"
+      - key: MAX_ZONE_WRITE_RATE
+        value: "20"
       - key: AI_API_KEY
         sync: false
       - key: AI_ASSISTANT_API_KEY
