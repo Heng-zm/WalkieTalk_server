@@ -189,3 +189,4 @@ create index if not exists geo_zones_device_id_idx on public.geo_zones(device_id
 - Redis is used for rate limiting, not cross-instance WebSocket room fanout.
 - Use sticky sessions if you scale multiple instances.
 - Restrict Mapbox `pk` token by allowed domains in Mapbox dashboard.
+# WalkieTalk_server
