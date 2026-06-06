@@ -1,6 +1,6 @@
-# WalkieTalk Go Backend — Render
+# អាយកូម Backend — Render
 
-Go API + native WebSocket server for WalkieTalk.
+Go API + native WebSocket server for អាយកូម.
 
 This backend is designed to be deployed separately from the frontend:
 
@@ -15,9 +15,9 @@ The backend does **not** serve the frontend. `/web/index.html` is intentionally 
 
 - Native WebSocket endpoint: `/ws`
 - Voice relay and live voice chunks
-- Safe message acknowledgement events: `msg_delivered`, `msg_read`, `msg_seen`
 - Channel list API with live user counts: `/channels`
-- Empty user-created channels expire after 15 minutes by default
+- Public/private channel state with backend invite-code/PIN checks
+- Empty user-created channels expire after 15 minutes by default with countdown metadata
 - Geo zones API: `/zones`
 - Mapbox public config endpoint: `/config/mapbox`
 - Keep-alive webhook endpoint: `/webhook/keepalive`
@@ -150,11 +150,27 @@ https://walkietalk-server-4pmn.onrender.com/webhook/keepalive?token=your-random-
 
 The `/health` endpoint is intentionally cheap and does not ping Redis/Supabase on every request. Use `/ready` for dependency checks; it is cached by `READINESS_CACHE_SECS`.
 
+## Private channels
 
-## Frontend brand/channel type update
+Private channel creation happens through the WebSocket `join_room` event. Send:
 
-- Frontend/PWA name changed to `អាយកូម`.
-- Added Khmer-friendly Google font stack using `Noto Sans Khmer`.
-- Channel sheet supports `សាធារណៈ / Public` and `ឯកជន / Private`.
-- Channel list shows visibility and `ចំនួនមនុស្ស`.
-- Backend channel snapshots now include `visibility`.
+```json
+{
+  "room": "TEAM1",
+  "name": "kimheng",
+  "visibility": "private",
+  "pin": "123456"
+}
+```
+
+The backend creates the channel, generates an invite code, and sends it back to the owner in `room_state.invite_code`. Other users must join with either `invite_code` or `pin`:
+
+```json
+{
+  "room": "TEAM1",
+  "name": "guest",
+  "invite_code": "AIKOM-1234ABCD"
+}
+```
+
+Invalid private joins return Khmer-friendly error code `PRIVATE_CHANNEL`.

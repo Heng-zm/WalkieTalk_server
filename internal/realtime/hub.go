@@ -2,10 +2,14 @@ package realtime
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -272,14 +276,24 @@ func (h *Hub) channelsSnapshotLocked() []ChannelState {
 		if copyState.Visibility == "" {
 			copyState.Visibility = "public"
 		}
+		copyState.Private = copyState.Visibility == "private"
 		copyState.UserCount = len(h.rooms[name])
 		copyState.Members = h.membersLocked(name)
+		copyState.InviteCode = ""
+		copyState.PINHash = ""
+		copyState.OwnerSID = ""
 		if copyState.UserCount == 0 && copyState.EmptySince != nil {
 			exp := copyState.EmptySince.Add(h.cfg.ChannelEmptyTTL)
 			copyState.ExpiresAt = &exp
+			remaining := int(time.Until(exp).Seconds())
+			if remaining < 0 {
+				remaining = 0
+			}
+			copyState.TTLRemainingSeconds = remaining
 		} else {
 			copyState.EmptySince = nil
 			copyState.ExpiresAt = nil
+			copyState.TTLRemainingSeconds = 0
 		}
 		if copyState.CreatedAt.IsZero() {
 			copyState.CreatedAt = now
@@ -313,20 +327,14 @@ func (h *Hub) BroadcastChannelsState() {
 	h.BroadcastAll("channels_state", h.channelPayload())
 }
 
-func (h *Hub) touchChannelLocked(room string, now time.Time, visibility string) {
+func (h *Hub) touchChannelLocked(room string, now time.Time) {
 	if room == "" {
 		return
 	}
 	state := h.channels[room]
 	if state == nil {
-		state = &ChannelState{Name: room, Visibility: visibility, CreatedAt: now}
+		state = &ChannelState{Name: room, Visibility: "public", CreatedAt: now, LastActive: now}
 		h.channels[room] = state
-	}
-	if visibility == "" {
-		visibility = "public"
-	}
-	if state.Visibility == "" || state.UserCount == 0 {
-		state.Visibility = visibility
 	}
 	state.UserCount = len(h.rooms[room])
 	state.LastActive = now
@@ -340,11 +348,8 @@ func (h *Hub) markChannelEmptyLocked(room string, now time.Time) {
 	}
 	state := h.channels[room]
 	if state == nil {
-		state = &ChannelState{Name: room, Visibility: "public", CreatedAt: now}
+		state = &ChannelState{Name: room, Visibility: "public", CreatedAt: now, LastActive: now}
 		h.channels[room] = state
-	}
-	if state.Visibility == "" {
-		state.Visibility = "public"
 	}
 	state.UserCount = 0
 	state.LastActive = now
@@ -376,6 +381,148 @@ func (h *Hub) CleanupExpiredChannels() {
 		h.BroadcastAll("channels_expired", map[string]any{"channels": expired})
 		h.BroadcastChannelsState()
 	}
+}
+
+func (h *Hub) prepareChannelJoinLocked(room, sid, name string, data map[string]any, now time.Time) (*ChannelState, string, string) {
+	visibility := cleanChannelVisibility(anyString(data["visibility"]))
+	if visibility == "" {
+		visibility = cleanChannelVisibility(anyString(data["channel_type"]))
+	}
+	if visibility == "" {
+		visibility = "public"
+	}
+
+	state := h.channels[room]
+	if state == nil {
+		state = &ChannelState{
+			Name:       room,
+			Visibility: visibility,
+			Private:    visibility == "private",
+			OwnerSID:   sid,
+			OwnerName:  name,
+			CreatedAt:  now,
+			LastActive: now,
+		}
+		if state.Private {
+			state.InviteCode = newChannelInviteCode(room)
+			pin := cleanChannelPIN(firstNonEmptyString(anyString(data["pin"]), anyString(data["channel_pin"])))
+			if pin != "" {
+				state.PINHash = hashChannelPIN(pin)
+				state.HasPIN = true
+			}
+		}
+		h.channels[room] = state
+		return state, "", ""
+	}
+
+	if state.Visibility == "" {
+		state.Visibility = "public"
+	}
+	state.Private = state.Visibility == "private"
+	if state.OwnerSID == "" {
+		state.OwnerSID = sid
+	}
+	if state.OwnerName == "" {
+		state.OwnerName = name
+	}
+
+	if state.OwnerSID == sid {
+		if visibility == "private" && !state.Private {
+			state.Visibility = "private"
+			state.Private = true
+			state.InviteCode = newChannelInviteCode(room)
+		}
+		pin := cleanChannelPIN(firstNonEmptyString(anyString(data["pin"]), anyString(data["channel_pin"])))
+		if state.Private && pin != "" {
+			state.PINHash = hashChannelPIN(pin)
+			state.HasPIN = true
+		}
+		return state, "", ""
+	}
+
+	if state.Private && !h.isRoomMemberLocked(room, sid) {
+		secret := cleanChannelSecret(firstNonEmptyString(
+			anyString(data["invite_code"]),
+			anyString(data["channel_code"]),
+			anyString(data["code"]),
+			anyString(data["secret"]),
+		))
+		pin := cleanChannelPIN(firstNonEmptyString(anyString(data["pin"]), anyString(data["channel_pin"])))
+		validInvite := state.InviteCode != "" && strings.EqualFold(secret, state.InviteCode)
+		validPIN := state.PINHash != "" && pin != "" && hashChannelPIN(pin) == state.PINHash
+		if !validInvite && !validPIN {
+			return state, "PRIVATE_CHANNEL", "ឆានែលឯកជន ត្រូវការកូដអញ្ជើញ ឬ PIN ត្រឹមត្រូវ"
+		}
+	}
+	return state, "", ""
+}
+
+func (h *Hub) isRoomMemberLocked(room, sid string) bool {
+	members := h.rooms[room]
+	return members != nil && members[sid]
+}
+
+func cleanChannelVisibility(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "private", "locked", "secret", "ឯកជន":
+		return "private"
+	case "public", "open", "សាធារណៈ":
+		return "public"
+	default:
+		return ""
+	}
+}
+
+func cleanChannelSecret(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if len(out) > 64 {
+		return out[:64]
+	}
+	return out
+}
+
+func cleanChannelPIN(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if len(out) > 12 {
+		return out[:12]
+	}
+	return out
+}
+
+func newChannelInviteCode(room string) string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "AIKOM-" + strings.ToUpper(util.RandomID(""))[:8]
+	}
+	return "AIKOM-" + strings.ToUpper(hex.EncodeToString(b))
+}
+
+func hashChannelPIN(pin string) string {
+	sum := sha256.Sum256([]byte(cleanChannelPIN(pin)))
+	return hex.EncodeToString(sum[:])
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (h *Hub) Members(room string) []RoomMember {
@@ -422,7 +569,7 @@ func (h *Hub) leaveNoBroadcast(sid string) (string, string) {
 			delete(h.rooms, room)
 			h.markChannelEmptyLocked(room, time.Now())
 		} else {
-			h.touchChannelLocked(room, time.Now(), "")
+			h.touchChannelLocked(room, time.Now())
 		}
 	}
 	delete(h.users, sid)

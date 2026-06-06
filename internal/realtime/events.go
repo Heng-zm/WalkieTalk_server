@@ -38,8 +38,6 @@ func (h *Hub) HandleEvent(ctx context.Context, c *Client, env Envelope) {
 		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "AI assistant was removed from this version"})
 	case "quality_pong":
 		h.handleQualityPong(c.SID, data)
-	case "msg_delivered", "message_delivered", "msg_read", "message_read", "msg_seen", "message_seen":
-		h.handleMessageAck(c.SID, strings.TrimSpace(env.Event), data)
 	case "screen_share_start", "screen_share_stop", "screen_share_state", "screen_viewer_ready", "screen_offer", "screen_answer", "screen_ice_candidate":
 		h.Send(c.SID, "error", map[string]any{"code": "FEATURE_DISABLED", "msg": "Screen sharing was removed from this version"})
 	default:
@@ -47,51 +45,84 @@ func (h *Hub) HandleEvent(ctx context.Context, c *Client, env Envelope) {
 	}
 }
 
-func cleanChannelVisibility(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "private", "locked", "secret":
-		return "private"
-	default:
-		return "public"
-	}
-}
-
 func (h *Hub) handleJoin(sid string, data map[string]any) {
 	room := util.CleanRoom(anyString(data["room"]), h.cfg.MaxRoomLen)
 	name := util.CleanName(anyString(data["name"]), sidPrefix(sid), h.cfg.MaxNameLen)
-	visibility := cleanChannelVisibility(anyString(data["visibility"]))
-	if visibility == "public" {
-		visibility = cleanChannelVisibility(anyString(data["channel_type"]))
-	}
 	if room == "" {
+		h.Send(sid, "error", map[string]any{"code": "BAD_CHANNEL", "msg": "សូមបញ្ចូលឈ្មោះឆានែលត្រឹមត្រូវ"})
 		return
 	}
+
+	now := time.Now()
+	h.mu.Lock()
+	state, errCode, errMsg := h.prepareChannelJoinLocked(room, sid, name, data, now)
+	if errCode != "" {
+		h.mu.Unlock()
+		h.Send(sid, "error", map[string]any{"code": errCode, "msg": errMsg, "room": room})
+		return
+	}
+	alreadyMember := h.isRoomMemberLocked(room, sid)
+	if !alreadyMember && len(h.rooms[room]) >= h.cfg.MaxRoomSize {
+		h.mu.Unlock()
+		h.Send(sid, "error", map[string]any{"code": "ROOM_FULL", "msg": "ឆានែលពេញហើយ"})
+		return
+	}
+	_ = state
+	h.mu.Unlock()
+
 	oldRoom, oldName := h.leaveNoBroadcast(sid)
 	if oldRoom != "" && oldRoom != room {
 		h.Broadcast(oldRoom, "peer_left", map[string]any{"sid": sid, "name": oldName}, sid)
 	}
 
-	now := time.Now()
 	h.mu.Lock()
 	if h.rooms[room] == nil {
 		h.rooms[room] = make(map[string]bool)
 	}
 	if len(h.rooms[room]) >= h.cfg.MaxRoomSize {
 		h.mu.Unlock()
-		h.Send(sid, "error", map[string]any{"code": "ROOM_FULL", "msg": "Room full"})
+		h.Send(sid, "error", map[string]any{"code": "ROOM_FULL", "msg": "ឆានែលពេញហើយ"})
 		return
 	}
 	h.rooms[room][sid] = true
 	h.users[sid] = &User{SID: sid, Name: name, Room: room, JoinedAt: now}
-	h.touchChannelLocked(room, now, visibility)
+	h.touchChannelLocked(room, now)
+	state = h.channels[room]
 	members := h.membersLocked(room)
 	userCount := len(members)
+	visibility := "public"
+	private := false
+	owner := false
+	inviteCode := ""
+	hasPIN := false
+	if state != nil {
+		visibility = state.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		private = visibility == "private"
+		hasPIN = state.HasPIN
+		owner = state.OwnerSID == sid
+		if owner && private {
+			inviteCode = state.InviteCode
+		}
+	}
 	h.mu.Unlock()
 
 	h.Broadcast(room, "peer_joined", map[string]any{"sid": sid, "name": name}, sid)
-	h.Send(sid, "room_state", map[string]any{"members": members, "user_count": userCount, "visibility": visibility})
+	h.Send(sid, "room_state", map[string]any{
+		"room":        room,
+		"channel":     room,
+		"members":     members,
+		"user_count":  userCount,
+		"visibility":  visibility,
+		"private":     private,
+		"owner":       owner,
+		"invite_code": inviteCode,
+		"has_pin":     hasPIN,
+	})
 	h.BroadcastChannelsState()
-	h.log.Printf("join sid=%s name=%s room=%s n=%d", sid, name, room, userCount)
+	h.log.Printf("join sid=%s name=%s room=%s n=%d visibility=%s", sid, name, room, userCount, visibility)
 }
 
 func (h *Hub) handleLeave(sid string) {
@@ -230,42 +261,6 @@ func (h *Hub) handleAIChat(ctx context.Context, sid string, data map[string]any)
 		}
 		h.Send(sid, "ai_chat_response", map[string]any{"msg_id": msgID, "text": res.Text, "sender_name": "AI Assistant"})
 	}()
-}
-
-func (h *Hub) handleMessageAck(sid, event string, data map[string]any) {
-	msgID := trim(anyString(data["msg_id"]), 80)
-	targetSID := trim(firstNonEmptyString(anyString(data["to"]), anyString(data["target_sid"]), anyString(data["sender_sid"])), 80)
-	room, name := h.roomName(sid)
-	if msgID == "" || targetSID == "" || room == "" || targetSID == sid {
-		return
-	}
-
-	h.mu.RLock()
-	targetUser := h.users[targetSID]
-	targetClient := h.clients[targetSID]
-	sameRoom := targetUser != nil && targetUser.Room == room && targetClient != nil
-	h.mu.RUnlock()
-	if !sameRoom {
-		return
-	}
-
-	h.Send(targetSID, event, map[string]any{
-		"msg_id":       msgID,
-		"from":         sid,
-		"from_sid":     sid,
-		"from_name":    name,
-		"target_sid":   targetSID,
-		"delivered_at": float64(time.Now().UnixNano()) / 1e9,
-	})
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
 
 func decodeMap(raw json.RawMessage) map[string]any {

@@ -40,12 +40,20 @@ type QualityState struct {
 }
 
 type ChannelState struct {
-	Name       string       `json:"name"`
-	Visibility string       `json:"visibility"`
-	UserCount  int          `json:"user_count"`
-	Members    []RoomMember `json:"members,omitempty"`
-	CreatedAt  time.Time    `json:"created_at"`
-	LastActive time.Time    `json:"last_active"`
-	EmptySince *time.Time   `json:"empty_since,omitempty"`
-	ExpiresAt  *time.Time   `json:"expires_at,omitempty"`
+	Name                string       `json:"name"`
+	Visibility          string       `json:"visibility"`
+	Private             bool         `json:"private"`
+	UserCount           int          `json:"user_count"`
+	Members             []RoomMember `json:"members,omitempty"`
+	OwnerName           string       `json:"owner_name,omitempty"`
+	HasPIN              bool         `json:"has_pin"`
+	CreatedAt           time.Time    `json:"created_at"`
+	LastActive          time.Time    `json:"last_active"`
+	EmptySince          *time.Time   `json:"empty_since,omitempty"`
+	ExpiresAt           *time.Time   `json:"expires_at,omitempty"`
+	TTLRemainingSeconds int          `json:"ttl_remaining_seconds,omitempty"`
+
+	OwnerSID   string `json:"-"`
+	InviteCode string `json:"-"`
+	PINHash    string `json:"-"`
 }
