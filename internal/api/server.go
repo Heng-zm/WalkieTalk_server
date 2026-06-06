@@ -188,7 +188,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sid := util.RandomID("sid_")
 	client := &realtime.Client{SID: sid, Hub: s.hub, Conn: conn, Send: make(chan realtime.Envelope, 256)}
 	s.hub.Register(client)
-	ctx := r.Context()
+	// Do not use r.Context() here: after a WebSocket upgrade, ServeHTTP returns
+	// and the request context can be cancelled while the socket is still alive.
+	ctx := context.Background()
 	go client.WritePump(ctx)
 	go client.ReadPump(ctx)
 }

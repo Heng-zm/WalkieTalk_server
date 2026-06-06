@@ -246,7 +246,7 @@ func anyBool(v any) bool {
 	case bool:
 		return b
 	case string:
-		s = strings.ToLower(strings.TrimSpace(b))
+		s := strings.ToLower(strings.TrimSpace(b))
 		return s == "1" || s == "true" || s == "yes" || s == "on"
 	default:
 		return false
